@@ -57,8 +57,8 @@ describe('runSyncCycle', () => {
   let db: DB
   beforeEach(() => { db = createDb(); seed(db) })
 
-  function deps(google: CalendarProvider, outlook: CalendarProvider) {
-    return { db, providerFor: (p: 'google' | 'outlook') => (p === 'google' ? google : outlook) }
+  function deps(google: CalendarProvider, outlook: CalendarProvider, now?: () => Date) {
+    return { db, providerFor: (p: 'google' | 'outlook') => (p === 'google' ? google : outlook), now }
   }
 
   it('creates blockers for new events, stores mappings and cursor', async () => {
@@ -119,7 +119,9 @@ describe('runSyncCycle', () => {
   })
 
   it('retries a full fetch when the cursor expired', async () => {
-    db.prepare("INSERT INTO sync_state (calendar_id, sync_cursor) VALUES (1, 'stale')").run()
+    // anchored_at fresh (just now) — isolates this test to the CursorExpiredError retry path,
+    // not the daily re-anchor logic covered separately below.
+    db.prepare("INSERT INTO sync_state (calendar_id, sync_cursor, anchored_at) VALUES (1, 'stale', datetime('now'))").run()
     const g = makeFakeProvider({
       failChangesWith: new CursorExpiredError('gone'),
       changes: (cursor) => ({ events: cursor === null ? [ev('e1')] : [], nextCursor: 'fresh' }),
@@ -184,5 +186,42 @@ describe('runSyncCycle', () => {
     const res = await runSyncCycle(deps(g.provider, o.provider))
     expect(res.processed).toBe(0)
     expect(g.calls).toEqual([])
+  })
+
+  it('re-anchors with a full refetch when the stored anchor is stale (>24h)', async () => {
+    const now = new Date('2026-07-10T00:00:00Z')
+    const staleAnchor = new Date(now.getTime() - 25 * 3_600_000).toISOString()
+    db.prepare("INSERT INTO sync_state (calendar_id, sync_cursor, anchored_at) VALUES (1, 'old', ?)").run(staleAnchor)
+    const g = makeFakeProvider({ changes: (cursor) => ({ events: cursor === null ? [ev('e1')] : [], nextCursor: 'new-cursor' }) })
+    const o = makeFakeProvider({})
+
+    const res = await runSyncCycle(deps(g.provider, o.provider, () => now))
+
+    expect(g.calls.map((c) => c.args[0])).toEqual([null])
+    expect(res.processed).toBe(1)
+    const row = db.prepare('SELECT sync_cursor, anchored_at FROM sync_state WHERE calendar_id = 1').get() as {
+      sync_cursor: string
+      anchored_at: string
+    }
+    expect(row.sync_cursor).toBe('new-cursor')
+    expect(row.anchored_at).toBe(now.toISOString())
+  })
+
+  it('keeps the incremental cursor and preserves anchored_at when the anchor is fresh (<24h)', async () => {
+    const now = new Date('2026-07-10T00:00:00Z')
+    const freshAnchor = new Date(now.getTime() - 3_600_000).toISOString()
+    db.prepare("INSERT INTO sync_state (calendar_id, sync_cursor, anchored_at) VALUES (1, 'cur', ?)").run(freshAnchor)
+    const g = makeFakeProvider({ changes: () => ({ events: [], nextCursor: 'cur2' }) })
+    const o = makeFakeProvider({})
+
+    await runSyncCycle(deps(g.provider, o.provider, () => now))
+
+    expect(g.calls.map((c) => c.args[0])).toEqual(['cur'])
+    const row = db.prepare('SELECT sync_cursor, anchored_at FROM sync_state WHERE calendar_id = 1').get() as {
+      sync_cursor: string
+      anchored_at: string
+    }
+    expect(row.sync_cursor).toBe('cur2')
+    expect(row.anchored_at).toBe(freshAnchor)
   })
 })

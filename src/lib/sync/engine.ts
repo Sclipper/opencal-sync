@@ -70,15 +70,22 @@ export async function runSyncCycle(deps: EngineDeps): Promise<{ processed: numbe
     for (const [calendarId, calLinks] of bySource) {
       const src = calLinks[0]
       const provider = deps.providerFor(src.src_provider)
-      const cursorRow = db.prepare('SELECT sync_cursor FROM sync_state WHERE calendar_id = ?').get(calendarId) as { sync_cursor: string | null } | undefined
+      const cursorRow = db.prepare('SELECT sync_cursor, anchored_at FROM sync_state WHERE calendar_id = ?').get(calendarId) as
+        | { sync_cursor: string | null; anchored_at: string | null }
+        | undefined
+      // ponytail: missing/stale anchor forces one full windowed refetch — idempotent thanks to mappings/hashes,
+      // and it's what keeps long-running instances from silently falling behind the provider's remembered window.
+      const anchorStale = Boolean(cursorRow?.sync_cursor) && (!cursorRow?.anchored_at || now.getTime() - Date.parse(cursorRow.anchored_at) > 86_400_000)
+      let usedNullCursor = anchorStale || !cursorRow?.sync_cursor
 
       let changes: Changes
       try {
         try {
-          changes = await provider.listChanges(src.src_account, src.src_cal, cursorRow?.sync_cursor ?? null, windowStart, windowEnd)
+          changes = await provider.listChanges(src.src_account, src.src_cal, anchorStale ? null : (cursorRow?.sync_cursor ?? null), windowStart, windowEnd)
         } catch (e) {
           if (!(e instanceof CursorExpiredError)) throw e
           db.prepare('DELETE FROM sync_state WHERE calendar_id = ?').run(calendarId)
+          usedNullCursor = true
           changes = await provider.listChanges(src.src_account, src.src_cal, null, windowStart, windowEnd)
         }
       } catch (e) {
@@ -137,10 +144,11 @@ export async function runSyncCycle(deps: EngineDeps): Promise<{ processed: numbe
       }
 
       if (calendarOk) {
+        const anchoredAt = usedNullCursor ? now.toISOString() : (cursorRow?.anchored_at ?? now.toISOString())
         db.prepare(
-          `INSERT INTO sync_state (calendar_id, sync_cursor, last_synced_at) VALUES (?, ?, datetime('now'))
-           ON CONFLICT(calendar_id) DO UPDATE SET sync_cursor = excluded.sync_cursor, last_synced_at = excluded.last_synced_at`,
-        ).run(calendarId, changes.nextCursor)
+          `INSERT INTO sync_state (calendar_id, sync_cursor, anchored_at, last_synced_at) VALUES (?, ?, ?, datetime('now'))
+           ON CONFLICT(calendar_id) DO UPDATE SET sync_cursor = excluded.sync_cursor, anchored_at = excluded.anchored_at, last_synced_at = excluded.last_synced_at`,
+        ).run(calendarId, changes.nextCursor, anchoredAt)
       }
     }
 

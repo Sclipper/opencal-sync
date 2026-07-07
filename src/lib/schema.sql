@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS event_mappings (
 CREATE TABLE IF NOT EXISTS sync_state (
   calendar_id INTEGER PRIMARY KEY REFERENCES calendars(id) ON DELETE CASCADE,
   sync_cursor TEXT,
+  anchored_at TEXT,
   last_synced_at TEXT
 );
 
