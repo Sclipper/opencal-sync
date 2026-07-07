@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS connections (
   composio_connected_account_id TEXT,
   account_label TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'pending', -- pending | active | error
+  composio_user_id TEXT NOT NULL DEFAULT 'default',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

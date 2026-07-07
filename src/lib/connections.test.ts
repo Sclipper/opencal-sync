@@ -51,8 +51,8 @@ describe('completeConnectionFlow', () => {
 
     await completeConnectionFlow(db, { composio, providerFor: () => fakeProvider })
 
-    expect(db.prepare('SELECT composio_connected_account_id, account_label, status FROM connections').get()).toEqual({
-      composio_connected_account_id: 'ca_9', account_label: 'me@gmail.com', status: 'active',
+    expect(db.prepare('SELECT composio_connected_account_id, account_label, composio_user_id, status FROM connections').get()).toEqual({
+      composio_connected_account_id: 'ca_9', account_label: 'me@gmail.com', composio_user_id: 'default', status: 'active',
     })
     expect(db.prepare('SELECT provider_calendar_id, name FROM calendars').all()).toEqual([{ provider_calendar_id: 'cal-1', name: 'Work' }])
   })

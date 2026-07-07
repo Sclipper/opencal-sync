@@ -43,8 +43,8 @@ export async function completeConnectionFlow(db: DB, deps: Deps = {}): Promise<v
     const account = await composio.connectedAccounts.waitForConnection(pending.composio_request_id, 120_000)
     if (account.status !== 'ACTIVE') throw new Error(`connection status: ${account.status}`)
     const label = String((account.data as Record<string, unknown> | undefined)?.email ?? `${pending.provider} account`)
-    db.prepare("UPDATE connections SET composio_connected_account_id = ?, account_label = ?, status = 'active' WHERE id = ? AND status = 'pending'")
-      .run(account.id, label, pending.id)
+    db.prepare("UPDATE connections SET composio_connected_account_id = ?, account_label = ?, composio_user_id = ?, status = 'active' WHERE id = ? AND status = 'pending'")
+      .run(account.id, label, USER_ID, pending.id)
     const calendars = await providerFor(pending.provider).listCalendars(account.id)
     const insert = db.prepare(
       'INSERT INTO calendars (connection_id, provider_calendar_id, name) VALUES (?, ?, ?) ON CONFLICT(connection_id, provider_calendar_id) DO UPDATE SET name = excluded.name',
