@@ -53,7 +53,7 @@ describe('outlookProvider.listChanges', () => {
       { id: 'ev2', status: 'cancelled', title: '', description: '', location: '', start: '', end: '', allDay: false, transparent: false },
       {
         id: 'ev3', status: 'active', title: 'OOO', description: '', location: '',
-        start: '2026-07-09T00:00:00.0000000Z', end: '2026-07-10T00:00:00.0000000Z', allDay: true, transparent: true,
+        start: '2026-07-09', end: '2026-07-10', allDay: true, transparent: true,
       },
     ])
   })

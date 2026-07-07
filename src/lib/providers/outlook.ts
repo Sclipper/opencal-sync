@@ -23,8 +23,8 @@ function mapEvent(raw: Record<string, any>): NormalizedEvent {
     title: raw.subject ?? '',
     description: raw.bodyPreview ?? '',
     location: raw.location?.displayName ?? '',
-    start: graphDate(raw.start),
-    end: graphDate(raw.end),
+    start: raw.isAllDay ? graphDate(raw.start).slice(0, 10) : graphDate(raw.start),
+    end: raw.isAllDay ? graphDate(raw.end).slice(0, 10) : graphDate(raw.end),
     allDay: Boolean(raw.isAllDay),
     transparent: raw.showAs === 'free',
   }
