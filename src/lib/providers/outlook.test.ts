@@ -41,6 +41,7 @@ describe('outlookProvider.listChanges', () => {
     expect(executeTool).toHaveBeenCalledWith('OUTLOOK_OUTLOOK_LIST_EVENTS', 'acc1', {
       filter: "start/dateTime lt '2026-09-05T00:00:00' and end/dateTime gt '2026-07-07T00:00:00'",
       top: 250,
+      expand_recurring_events: true,
     })
     expect(res.nextCursor).toBeNull()
     expect(res.snapshot).toBe(true)
@@ -133,6 +134,7 @@ describe('outlookProvider reads', () => {
     expect(executeTool).toHaveBeenCalledWith('OUTLOOK_OUTLOOK_LIST_EVENTS', 'acc1', {
       filter: "start/dateTime lt '2026-09-05T00:00:00' and end/dateTime gt '2026-07-07T00:00:00'",
       top: 250,
+      expand_recurring_events: true,
     })
   })
 })

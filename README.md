@@ -50,10 +50,9 @@ Writes (creating/updating blockers) add calls proportional to how busy your cale
 ## Limitations (v1)
 
 - Polling only (default 5 min) — not instant. Composio triggers/webhooks are a possible future upgrade.
-- Google recurring events sync as individual instances inside the sync window (default 60 days ahead). The window re-anchors with a full refetch once a day, so long-running instances stay current.
+- Recurring events sync as individual expanded occurrences inside the sync window (default 60 days ahead) on both providers. The window re-anchors with a full refetch once a day, so long-running instances stay current.
 - Outlook syncs the **default calendar only** — Composio's Outlook toolkit exposes no calendar-scoped event tools (list/create only ever operate on the caller's default calendar).
 - Outlook has **no incremental sync** — Composio's toolkit has no calendar delta/sync-token tool, so every poll is a full window fetch; deletions are inferred by diffing the fetched snapshot against the last-known mappings rather than reported directly.
-- Outlook recurring events currently sync as their series master only (no occurrence-expansion tool used), so recurring Outlook series are only partially mirrored — instance-level changes/cancellations on a recurring series may not propagate.
 - Updated events are recreated (delete + create), so blocker event IDs change on edit.
 - All-day events are mirrored as 24-hour timed blockers on both providers (Google's create tool has no confirmed all-day support; Outlook's has no `is_all_day` field at all).
 - Blocker deletions never send cancellation emails/notifications to attendees.

@@ -52,6 +52,9 @@ async function listWindow(accountId: string, windowStart: string, windowEnd: str
       // window overlap, not containment: catch events that start before / end after the window edges
       filter: `start/dateTime lt '${endNaive}' and end/dateTime gt '${startNaive}'`,
       top: 250,
+      // expand recurring series into per-occurrence entries (each with a stable id),
+      // so the mapping/snapshot-diff model handles instances the same as Google.
+      expand_recurring_events: true,
     }),
   )
   return (payload.value ?? []).map(mapEvent)
