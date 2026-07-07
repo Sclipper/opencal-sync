@@ -10,7 +10,7 @@ const { outlookProvider } = await import('./outlook')
 beforeEach(() => executeTool.mockReset())
 
 describe('outlookProvider.listChanges', () => {
-  it('maps Graph events, @removed entries, and delta link', async () => {
+  it('does a full-window snapshot fetch, maps Graph events, and ignores the cursor', async () => {
     executeTool.mockResolvedValueOnce({
       value: [
         {
@@ -34,17 +34,16 @@ describe('outlookProvider.listChanges', () => {
           showAs: 'free',
         },
       ],
-      '@odata.deltaLink': 'https://graph.microsoft.com/delta?token=abc',
     })
 
-    const res = await outlookProvider.listChanges('acc1', 'cal1', null, '2026-07-07T00:00:00Z', '2026-09-05T00:00:00Z')
+    const res = await outlookProvider.listChanges('acc1', 'cal1', 'some-stale-cursor', '2026-07-07T00:00:00Z', '2026-09-05T00:00:00Z')
 
-    expect(executeTool).toHaveBeenCalledWith('OUTLOOK_LIST_CALENDAR_VIEW_DELTA', 'acc1', {
-      calendar_id: 'cal1',
-      start_datetime: '2026-07-07T00:00:00Z',
-      end_datetime: '2026-09-05T00:00:00Z',
+    expect(executeTool).toHaveBeenCalledWith('OUTLOOK_OUTLOOK_LIST_EVENTS', 'acc1', {
+      filter: "start/dateTime lt '2026-09-05T00:00:00' and end/dateTime gt '2026-07-07T00:00:00'",
+      top: 250,
     })
-    expect(res.nextCursor).toBe('https://graph.microsoft.com/delta?token=abc')
+    expect(res.nextCursor).toBeNull()
+    expect(res.snapshot).toBe(true)
     expect(res.events).toEqual([
       {
         id: 'ev1', status: 'active', title: 'Standup', description: 'daily', location: 'Teams',
@@ -58,54 +57,40 @@ describe('outlookProvider.listChanges', () => {
     ])
   })
 
-  it('passes the stored delta cursor and follows nextLink pages', async () => {
-    executeTool
-      .mockResolvedValueOnce({ value: [], '@odata.nextLink': 'https://graph/next?x=1' })
-      .mockResolvedValueOnce({ value: [], '@odata.deltaLink': 'https://graph/delta?y=2' })
-
-    const res = await outlookProvider.listChanges('acc1', 'cal1', 'https://graph/delta?old=1', 'ws', 'we')
-
-    expect(executeTool).toHaveBeenNthCalledWith(1, 'OUTLOOK_LIST_CALENDAR_VIEW_DELTA', 'acc1', {
-      calendar_id: 'cal1', start_datetime: 'ws', end_datetime: 'we', delta_token: 'https://graph/delta?old=1',
-    })
-    expect(executeTool).toHaveBeenNthCalledWith(2, 'OUTLOOK_LIST_CALENDAR_VIEW_DELTA', 'acc1', {
-      calendar_id: 'cal1', start_datetime: 'ws', end_datetime: 'we', delta_token: 'https://graph/next?x=1',
-    })
-    expect(res.nextCursor).toBe('https://graph/delta?y=2')
+  it('unwraps response_data envelopes', async () => {
+    executeTool.mockResolvedValueOnce({ response_data: { value: [] } })
+    const res = await outlookProvider.listChanges('acc1', 'cal1', null, '2026-07-07T00:00:00Z', '2026-09-05T00:00:00Z')
+    expect(res).toEqual({ events: [], nextCursor: null, snapshot: true })
   })
 })
 
 describe('outlookProvider writes', () => {
-  it('creates events in a specific calendar', async () => {
+  it('creates events with naive UTC datetimes on the default calendar', async () => {
     executeTool.mockResolvedValueOnce({ response_data: { id: 'new1' } })
     const id = await outlookProvider.createEvent('acc1', 'cal1', {
       title: 'Busy', description: 'x', start: '2026-07-08T10:00:00+03:00', end: '2026-07-08T11:00:00+03:00', allDay: false,
     })
     expect(id).toBe('new1')
-    expect(executeTool).toHaveBeenCalledWith('OUTLOOK_CREATE_CALENDAR_EVENT_IN_CALENDAR', 'acc1', {
-      calendar_id: 'cal1',
+    expect(executeTool).toHaveBeenCalledWith('OUTLOOK_OUTLOOK_CALENDAR_CREATE_EVENT', 'acc1', {
       subject: 'Busy',
       body: 'x',
       location: undefined,
-      is_all_day: false,
-      start_datetime: '2026-07-08T07:00:00.000Z',
-      end_datetime: '2026-07-08T08:00:00.000Z',
+      start_datetime: '2026-07-08T07:00:00',
+      end_datetime: '2026-07-08T08:00:00',
       time_zone: 'UTC',
       show_as: 'busy',
     })
   })
 
-  it('creates all-day events with date bounds preserved', async () => {
+  it('creates all-day events as an untruncated multi-day timed span', async () => {
     executeTool.mockResolvedValueOnce({ id: 'new2' })
-    await outlookProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-07-09', end: '2026-07-10', allDay: true })
-    expect(executeTool).toHaveBeenCalledWith('OUTLOOK_CREATE_CALENDAR_EVENT_IN_CALENDAR', 'acc1', {
-      calendar_id: 'cal1',
+    await outlookProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-07-09', end: '2026-07-12', allDay: true })
+    expect(executeTool).toHaveBeenCalledWith('OUTLOOK_OUTLOOK_CALENDAR_CREATE_EVENT', 'acc1', {
       subject: 'Busy',
-      body: undefined,
+      body: '',
       location: undefined,
-      is_all_day: true,
-      start_datetime: '2026-07-09T00:00:00.000Z',
-      end_datetime: '2026-07-10T00:00:00.000Z',
+      start_datetime: '2026-07-09T00:00:00',
+      end_datetime: '2026-07-12T00:00:00',
       time_zone: 'UTC',
       show_as: 'busy',
     })
@@ -118,25 +103,36 @@ describe('outlookProvider writes', () => {
     ).rejects.toThrow('no event id')
   })
 
-  it('deletes events', async () => {
+  it('deletes events without sending cancellation notifications', async () => {
     executeTool.mockResolvedValueOnce({})
     await outlookProvider.deleteEvent('acc1', 'cal1', 'ev9')
-    expect(executeTool).toHaveBeenCalledWith('OUTLOOK_DELETE_CALENDAR_EVENT', 'acc1', { event_id: 'ev9' })
+    expect(executeTool).toHaveBeenCalledWith('OUTLOOK_OUTLOOK_DELETE_EVENT', 'acc1', { event_id: 'ev9', send_notifications: false })
   })
 })
 
 describe('outlookProvider reads', () => {
-  it('lists calendars', async () => {
-    executeTool.mockResolvedValueOnce({ value: [{ id: 'c1', name: 'Calendar' }] })
-    expect(await outlookProvider.listCalendars('acc1')).toEqual([{ id: 'c1', name: 'Calendar' }])
+  it('returns only the default calendar, suffixed', async () => {
+    executeTool.mockResolvedValueOnce({
+      value: [
+        { id: 'c1', name: 'Calendar', isDefaultCalendar: false },
+        { id: 'c2', name: 'Personal', isDefaultCalendar: true },
+      ],
+    })
+    expect(await outlookProvider.listCalendars('acc1')).toEqual([{ id: 'c2', name: 'Personal (default)' }])
     expect(executeTool).toHaveBeenCalledWith('OUTLOOK_LIST_CALENDARS', 'acc1', {})
   })
 
-  it('lists events in a range via calendar view', async () => {
+  it('falls back to the first calendar when none is flagged default', async () => {
+    executeTool.mockResolvedValueOnce({ value: [{ id: 'c1', name: 'Calendar' }] })
+    expect(await outlookProvider.listCalendars('acc1')).toEqual([{ id: 'c1', name: 'Calendar (default)' }])
+  })
+
+  it('lists events in a range via the shared window helper', async () => {
     executeTool.mockResolvedValueOnce({ value: [] })
-    await outlookProvider.listEvents('acc1', 'cal1', 't1', 't2')
-    expect(executeTool).toHaveBeenCalledWith('OUTLOOK_LIST_USER_CALENDAR_VIEW', 'acc1', {
-      calendar_id: 'cal1', start_datetime: 't1', end_datetime: 't2',
+    await outlookProvider.listEvents('acc1', 'cal1', '2026-07-07T00:00:00Z', '2026-09-05T00:00:00Z')
+    expect(executeTool).toHaveBeenCalledWith('OUTLOOK_OUTLOOK_LIST_EVENTS', 'acc1', {
+      filter: "start/dateTime lt '2026-09-05T00:00:00' and end/dateTime gt '2026-07-07T00:00:00'",
+      top: 250,
     })
   })
 })

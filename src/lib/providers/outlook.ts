@@ -34,61 +34,72 @@ function toUtcIso(value: string): string {
   return new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00Z` : value).toISOString()
 }
 
+// OUTLOOK_OUTLOOK_LIST_EVENTS / OUTLOOK_OUTLOOK_CALENDAR_CREATE_EVENT both take naive
+// datetimes (no offset/Z) — the Google-side helper of the same name does the same thing.
+function toNaiveUtc(value: string): string {
+  return toUtcIso(value).replace(/\.\d{3}Z$/, '')
+}
+
+// Composio's Outlook toolkit exposes no calendar-scoped event tool: OUTLOOK_OUTLOOK_LIST_EVENTS
+// only reads user_id's default calendar via an OData `filter` string (no calendarId param), and
+// has no delta/sync-token tool either — every call is a fresh full-window fetch.
+// ponytail: no page_token loop; 250 covers any sane window's event count.
+async function listWindow(accountId: string, windowStart: string, windowEnd: string): Promise<NormalizedEvent[]> {
+  const startNaive = toNaiveUtc(windowStart)
+  const endNaive = toNaiveUtc(windowEnd)
+  const payload = unwrap(
+    await executeTool('OUTLOOK_OUTLOOK_LIST_EVENTS', accountId, {
+      // window overlap, not containment: catch events that start before / end after the window edges
+      filter: `start/dateTime lt '${endNaive}' and end/dateTime gt '${startNaive}'`,
+      top: 250,
+    }),
+  )
+  return (payload.value ?? []).map(mapEvent)
+}
+
 export const outlookProvider: CalendarProvider = {
   async listCalendars(accountId) {
+    // Composio's Outlook toolkit has no calendar-scoped event tools, so only the default calendar is usable.
     const payload = unwrap(await executeTool('OUTLOOK_LIST_CALENDARS', accountId, {}))
-    return (payload.value ?? []).map((c: Record<string, any>) => ({ id: String(c.id), name: c.name ?? String(c.id) }))
+    const value = (payload.value ?? []) as Record<string, any>[]
+    const cal = value.find((c) => c.isDefaultCalendar) ?? value[0]
+    if (!cal) return []
+    return [{ id: String(cal.id), name: `${cal.name ?? String(cal.id)} (default)` }]
   },
 
-  async listChanges(accountId, calendarId, cursor, windowStart, windowEnd): Promise<Changes> {
-    const events: NormalizedEvent[] = []
-    let token: string | null = cursor
-    let nextCursor: string | null = cursor
-    for (;;) {
-      const args: Record<string, unknown> = { calendar_id: calendarId, start_datetime: windowStart, end_datetime: windowEnd }
-      if (token) args.delta_token = token
-      const payload = unwrap(await executeTool('OUTLOOK_LIST_CALENDAR_VIEW_DELTA', accountId, args))
-      for (const item of payload.value ?? []) events.push(mapEvent(item))
-      if (payload['@odata.nextLink']) {
-        token = String(payload['@odata.nextLink'])
-        continue
-      }
-      if (payload['@odata.deltaLink']) nextCursor = String(payload['@odata.deltaLink'])
-      return { events, nextCursor }
-    }
+  async listChanges(accountId, _calendarId, _cursor, windowStart, windowEnd): Promise<Changes> {
+    // ponytail: no calendar delta tool exists for this toolkit — full-window snapshot every poll;
+    // deletions are inferred by diffing against stored mappings (sync/core.ts planActions snapshot mode).
+    const events = await listWindow(accountId, windowStart, windowEnd)
+    return { events, nextCursor: null, snapshot: true }
   },
 
-  async listEvents(accountId, calendarId, timeMin, timeMax) {
+  async listEvents(accountId, _calendarId, timeMin, timeMax) {
+    return listWindow(accountId, timeMin, timeMax)
+  },
+
+  async createEvent(accountId, _calendarId, event: WriteEvent) {
     const payload = unwrap(
-      await executeTool('OUTLOOK_LIST_USER_CALENDAR_VIEW', accountId, {
-        calendar_id: calendarId,
-        start_datetime: timeMin,
-        end_datetime: timeMax,
-      }),
-    )
-    return (payload.value ?? []).map(mapEvent)
-  },
-
-  async createEvent(accountId, calendarId, event: WriteEvent) {
-    const payload = unwrap(
-      await executeTool('OUTLOOK_CREATE_CALENDAR_EVENT_IN_CALENDAR', accountId, {
-        calendar_id: calendarId,
+      await executeTool('OUTLOOK_OUTLOOK_CALENDAR_CREATE_EVENT', accountId, {
         subject: event.title,
-        body: event.description,
+        body: event.description ?? '',
         location: event.location,
-        is_all_day: event.allDay,
-        start_datetime: toUtcIso(event.start),
-        end_datetime: toUtcIso(event.end),
+        // ponytail: this tool has no is_all_day field, so all-day blockers become a plain timed
+        // span; unlike Google's duration-hour schema this one takes explicit start/end datetimes,
+        // so multi-day spans need no clamp — the true instants pass through untouched.
+        start_datetime: toNaiveUtc(event.start),
+        end_datetime: toNaiveUtc(event.end),
         time_zone: 'UTC',
         show_as: 'busy',
       }),
     )
     const id = payload.id
-    if (id === undefined || id === null || id === '') throw new Error('OUTLOOK_CREATE_CALENDAR_EVENT_IN_CALENDAR returned no event id')
+    if (id === undefined || id === null || id === '') throw new Error('OUTLOOK_OUTLOOK_CALENDAR_CREATE_EVENT returned no event id')
     return String(id)
   },
 
   async deleteEvent(accountId, _calendarId, eventId) {
-    await executeTool('OUTLOOK_DELETE_CALENDAR_EVENT', accountId, { event_id: eventId })
+    // blockers must never email anyone
+    await executeTool('OUTLOOK_OUTLOOK_DELETE_EVENT', accountId, { event_id: eventId, send_notifications: false })
   },
 }
