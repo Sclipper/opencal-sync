@@ -27,6 +27,11 @@ function toUtcIso(value: string): string {
   return new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00Z` : value).toISOString()
 }
 
+// GOOGLECALENDAR_CREATE_EVENT's start_datetime must be naive (no offset/Z) — paired with timezone: 'UTC'.
+function toNaiveUtc(value: string): string {
+  return toUtcIso(value).replace(/\.\d{3}Z$/, '')
+}
+
 async function listRange(
   accountId: string,
   calendarId: string,
@@ -52,8 +57,9 @@ async function listRange(
 
 export const googleProvider: CalendarProvider = {
   async listCalendars(accountId) {
-    const payload = unwrap(await executeTool('GOOGLECALENDAR_LIST_CALENDARS', accountId, {}))
-    return (payload.items ?? []).map((c: Record<string, any>) => ({ id: String(c.id), name: c.summary ?? String(c.id) }))
+    // ponytail: no page_token loop; 250 covers any sane account.
+    const payload = unwrap(await executeTool('GOOGLECALENDAR_LIST_CALENDARS', accountId, { max_results: 250 }))
+    return (payload.calendars ?? []).map((c: Record<string, any>) => ({ id: String(c.id), name: c.summary ?? String(c.id) }))
   },
 
   listChanges(accountId, calendarId, cursor, windowStart, windowEnd) {
@@ -68,15 +74,20 @@ export const googleProvider: CalendarProvider = {
   async createEvent(accountId, calendarId, event: WriteEvent) {
     const startIso = toUtcIso(event.start)
     const minutes = Math.max(1, Math.round((Date.parse(toUtcIso(event.end)) - Date.parse(startIso)) / 60_000))
+    const rawHours = Math.floor(minutes / 60)
+    const clamped = rawHours > 24
+    // ponytail: >24h events truncated to a 24h blocker; split into per-day blockers if multi-day fidelity ever matters
+    const hours = Math.min(24, rawHours)
+    const durationMinutes = clamped ? 0 : minutes % 60
     const payload = unwrap(
       await executeTool('GOOGLECALENDAR_CREATE_EVENT', accountId, {
         calendar_id: calendarId,
         summary: event.title,
         description: event.description,
         location: event.location,
-        start_datetime: startIso,
-        event_duration_hour: Math.floor(minutes / 60),
-        event_duration_minutes: minutes % 60,
+        start_datetime: toNaiveUtc(event.start),
+        event_duration_hour: hours,
+        event_duration_minutes: durationMinutes,
         timezone: 'UTC',
       }),
     )

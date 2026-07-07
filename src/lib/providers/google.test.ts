@@ -96,7 +96,7 @@ describe('googleProvider.createEvent', () => {
       summary: 'Busy',
       description: undefined,
       location: undefined,
-      start_datetime: '2026-07-08T07:00:00.000Z',
+      start_datetime: '2026-07-08T07:00:00',
       event_duration_hour: 1,
       event_duration_minutes: 30,
       timezone: 'UTC',
@@ -112,7 +112,22 @@ describe('googleProvider.createEvent', () => {
       summary: 'Busy',
       description: undefined,
       location: undefined,
-      start_datetime: '2026-07-09T00:00:00.000Z',
+      start_datetime: '2026-07-09T00:00:00',
+      event_duration_hour: 24,
+      event_duration_minutes: 0,
+      timezone: 'UTC',
+    })
+  })
+
+  it('clamps multi-day (>24h) events to a 24h blocker with a naive start', async () => {
+    executeTool.mockResolvedValueOnce({ id: 'new-ev3' })
+    await googleProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-07-09', end: '2026-07-12', allDay: true })
+    expect(executeTool).toHaveBeenCalledWith('GOOGLECALENDAR_CREATE_EVENT', 'acc1', {
+      calendar_id: 'cal1',
+      summary: 'Busy',
+      description: undefined,
+      location: undefined,
+      start_datetime: '2026-07-09T00:00:00',
       event_duration_hour: 24,
       event_duration_minutes: 0,
       timezone: 'UTC',
@@ -135,9 +150,9 @@ describe('googleProvider.deleteEvent / listCalendars / listEvents', () => {
   })
 
   it('lists calendars', async () => {
-    executeTool.mockResolvedValueOnce({ items: [{ id: 'c1', summary: 'Work' }] })
+    executeTool.mockResolvedValueOnce({ calendars: [{ id: 'c1', summary: 'Work' }] })
     expect(await googleProvider.listCalendars('acc1')).toEqual([{ id: 'c1', name: 'Work' }])
-    expect(executeTool).toHaveBeenCalledWith('GOOGLECALENDAR_LIST_CALENDARS', 'acc1', {})
+    expect(executeTool).toHaveBeenCalledWith('GOOGLECALENDAR_LIST_CALENDARS', 'acc1', { max_results: 250 })
   })
 
   it('lists events for a time range', async () => {
