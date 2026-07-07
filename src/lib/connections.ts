@@ -42,10 +42,20 @@ export async function completeConnectionFlow(db: DB, deps: Deps = {}): Promise<v
   try {
     const account = await composio.connectedAccounts.waitForConnection(pending.composio_request_id, 120_000)
     if (account.status !== 'ACTIVE') throw new Error(`connection status: ${account.status}`)
-    const label = String((account.data as Record<string, unknown> | undefined)?.email ?? `${pending.provider} account`)
-    db.prepare("UPDATE connections SET composio_connected_account_id = ?, account_label = ?, composio_user_id = ?, status = 'active' WHERE id = ? AND status = 'pending'")
-      .run(account.id, label, USER_ID, pending.id)
     const calendars = await providerFor(pending.provider).listCalendars(account.id)
+    // Composio returns no email in account.data for Google OAuth — but Google's primary calendar id
+    // IS the account email. Outlook primary ids are opaque Graph ids, hence the '@' guard.
+    const email = (account.data as Record<string, unknown> | undefined)?.email
+    const primaryId = calendars.find((c) => c.primary)?.id
+    const label =
+      (typeof email === 'string' && email) ||
+      (primaryId?.includes('@') ? primaryId : '') ||
+      `${pending.provider} account`
+    // status != 'active': never touch an already-active row, but DO recover one that a racing
+    // duplicate callback marked 'error' while we were still listing calendars — we hold a
+    // confirmed ACTIVE account, so activation is correct regardless of that interleaving.
+    db.prepare("UPDATE connections SET composio_connected_account_id = ?, account_label = ?, composio_user_id = ?, status = 'active' WHERE id = ? AND status != 'active'")
+      .run(account.id, label, USER_ID, pending.id)
     const insert = db.prepare(
       'INSERT INTO calendars (connection_id, provider_calendar_id, name) VALUES (?, ?, ?) ON CONFLICT(connection_id, provider_calendar_id) DO UPDATE SET name = excluded.name',
     )

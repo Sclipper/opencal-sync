@@ -78,7 +78,7 @@ export const outlookProvider: CalendarProvider = {
     const value = (payload.value ?? []) as Record<string, any>[]
     const cal = value.find((c) => c.isDefaultCalendar) ?? value[0]
     if (!cal) return []
-    return [{ id: String(cal.id), name: `${cal.name ?? String(cal.id)} (default)` }]
+    return [{ id: String(cal.id), name: `${cal.name ?? String(cal.id)} (default)`, primary: true }]
   },
 
   async listChanges(accountId, _calendarId, _cursor, windowStart, windowEnd): Promise<Changes> {

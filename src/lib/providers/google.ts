@@ -59,7 +59,11 @@ export const googleProvider: CalendarProvider = {
   async listCalendars(accountId) {
     // ponytail: no page_token loop; 250 covers any sane account.
     const payload = unwrap(await executeTool('GOOGLECALENDAR_LIST_CALENDARS', accountId, { max_results: 250 }))
-    return (payload.calendars ?? []).map((c: Record<string, any>) => ({ id: String(c.id), name: c.summary ?? String(c.id) }))
+    return (payload.calendars ?? []).map((c: Record<string, any>) => ({
+      id: String(c.id),
+      name: c.summary ?? String(c.id),
+      primary: c.primary === true || undefined,
+    }))
   },
 
   listChanges(accountId, calendarId, cursor, windowStart, windowEnd) {

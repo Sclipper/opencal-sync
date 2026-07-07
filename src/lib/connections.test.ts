@@ -5,7 +5,10 @@ import { completeConnectionFlow, startConnectionFlow } from './connections'
 import type { CalendarProvider } from './providers/types'
 
 const fakeProvider: CalendarProvider = {
-  listCalendars: vi.fn(async () => [{ id: 'cal-1', name: 'Work' }]),
+  listCalendars: vi.fn(async () => [
+    { id: 'me@gmail.com', name: 'me@gmail.com', primary: true },
+    { id: 'cal-1', name: 'Work' },
+  ]),
   listChanges: vi.fn(),
   listEvents: vi.fn(),
   createEvent: vi.fn(),
@@ -54,7 +57,50 @@ describe('completeConnectionFlow', () => {
     expect(db.prepare('SELECT composio_connected_account_id, account_label, composio_user_id, status FROM connections').get()).toEqual({
       composio_connected_account_id: 'ca_9', account_label: 'me@gmail.com', composio_user_id: 'default', status: 'active',
     })
-    expect(db.prepare('SELECT provider_calendar_id, name FROM calendars').all()).toEqual([{ provider_calendar_id: 'cal-1', name: 'Work' }])
+    expect(db.prepare('SELECT provider_calendar_id, name FROM calendars ORDER BY id').all()).toEqual([
+      { provider_calendar_id: 'me@gmail.com', name: 'me@gmail.com' },
+      { provider_calendar_id: 'cal-1', name: 'Work' },
+    ])
+  })
+
+  it('falls back to the primary calendar id when composio omits the email', async () => {
+    const db = createDb()
+    setSetting(db, 'google_auth_config_id', 'ac_123')
+    const composio = {
+      connectedAccounts: {
+        link: vi.fn(async () => ({ id: 'req-1', redirectUrl: 'u' })),
+        waitForConnection: vi.fn(async () => ({ id: 'ca_9', status: 'ACTIVE', data: {} })),
+      },
+    }
+    await startConnectionFlow(db, 'google', 'http://x', { composio })
+
+    await completeConnectionFlow(db, { composio, providerFor: () => fakeProvider })
+
+    expect(db.prepare('SELECT account_label, status FROM connections').get()).toEqual({
+      account_label: 'me@gmail.com', status: 'active',
+    })
+  })
+
+  it('keeps the generic label when the primary calendar id is opaque (no @)', async () => {
+    const db = createDb()
+    setSetting(db, 'google_auth_config_id', 'ac_123')
+    const composio = {
+      connectedAccounts: {
+        link: vi.fn(async () => ({ id: 'req-1', redirectUrl: 'u' })),
+        waitForConnection: vi.fn(async () => ({ id: 'ca_9', status: 'ACTIVE', data: {} })),
+      },
+    }
+    const opaqueProvider = {
+      ...fakeProvider,
+      listCalendars: vi.fn(async () => [{ id: 'AQMkADAwATM0MDAAMS1iOTZj', name: 'Calendar', primary: true }]),
+    } as unknown as CalendarProvider
+    await startConnectionFlow(db, 'google', 'http://x', { composio })
+
+    await completeConnectionFlow(db, { composio, providerFor: () => opaqueProvider })
+
+    expect(db.prepare('SELECT account_label, status FROM connections').get()).toEqual({
+      account_label: 'google account', status: 'active',
+    })
   })
 
   it('marks the connection as error when activation fails', async () => {

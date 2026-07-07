@@ -24,7 +24,7 @@ export type WriteEvent = {
 export type Changes = { events: NormalizedEvent[]; nextCursor: string | null; snapshot?: boolean }
 
 export interface CalendarProvider {
-  listCalendars(accountId: string): Promise<{ id: string; name: string }[]>
+  listCalendars(accountId: string): Promise<{ id: string; name: string; primary?: boolean }[]>
   listChanges(
     accountId: string,
     calendarId: string,
