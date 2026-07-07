@@ -9,6 +9,18 @@ export function createDb(path = ':memory:'): DB {
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
   db.exec(readFileSync(join(process.cwd(), 'src/lib/schema.sql'), 'utf8'))
+  // ponytail: schema.sql only creates tables; columns added after first release need guarded
+  // ALTERs here — switch to numbered migrations if this list ever grows past a handful
+  for (const ddl of [
+    'ALTER TABLE sync_state ADD COLUMN anchored_at TEXT',
+    "ALTER TABLE connections ADD COLUMN composio_user_id TEXT NOT NULL DEFAULT 'default'",
+  ]) {
+    try {
+      db.exec(ddl)
+    } catch {
+      // column already exists
+    }
+  }
   return db
 }
 

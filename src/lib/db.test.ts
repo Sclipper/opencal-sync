@@ -1,3 +1,4 @@
+import Database from 'better-sqlite3'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -35,6 +36,39 @@ describe('db', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM calendars').get()).toEqual({ n: 1 })
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_links').get()).toEqual({ n: 0 })
     expect(db.prepare('SELECT COUNT(*) AS n FROM event_mappings').get()).toEqual({ n: 0 })
+  })
+
+  it('retrofits columns added after first release onto pre-existing databases', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'opencal-')), 'legacy.db')
+    // legacy-shaped db: tables exist (so CREATE TABLE IF NOT EXISTS is a no-op) but lack newer columns
+    const legacy = new Database(path)
+    legacy.exec(`
+      CREATE TABLE connections (
+        id INTEGER PRIMARY KEY,
+        provider TEXT NOT NULL CHECK (provider IN ('google', 'outlook')),
+        composio_request_id TEXT,
+        composio_connected_account_id TEXT,
+        account_label TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE TABLE sync_state (
+        calendar_id INTEGER PRIMARY KEY,
+        sync_cursor TEXT,
+        last_synced_at TEXT
+      );
+    `)
+    legacy.close()
+
+    const db = createDb(path)
+    expect(() => db.prepare('SELECT composio_user_id FROM connections')).not.toThrow()
+    expect(() => db.prepare('SELECT anchored_at FROM sync_state')).not.toThrow()
+    db.close()
+
+    // fresh dbs (columns already in schema.sql) still create cleanly
+    const fresh = createDb()
+    expect(() => fresh.prepare('SELECT composio_user_id FROM connections')).not.toThrow()
+    expect(() => fresh.prepare('SELECT anchored_at FROM sync_state')).not.toThrow()
   })
 
   it('rejects duplicate sync_links for the same calendar pair', () => {
