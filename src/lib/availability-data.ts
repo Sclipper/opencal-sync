@@ -31,8 +31,14 @@ export async function getAvailability(slug: string): Promise<{ page: PageRow; da
   const page = db.prepare('SELECT * FROM availability_pages WHERE slug = ? AND enabled = 1').get(slug) as PageRow | undefined
   if (!page) return null
 
-  const hours = JSON.parse(page.working_hours) as WorkingHours
-  const calendarIds = JSON.parse(page.calendar_ids) as number[]
+  let hours: WorkingHours
+  let calendarIds: number[]
+  try {
+    hours = JSON.parse(page.working_hours) as WorkingHours
+    calendarIds = JSON.parse(page.calendar_ids) as number[]
+  } catch {
+    return null // malformed row degrades to notFound, never a 500 for a public visitor
+  }
   const from = Date.now()
   const timeMax = new Date(from + page.days_ahead * 86_400_000).toISOString()
 
