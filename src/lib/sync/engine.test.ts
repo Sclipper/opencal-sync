@@ -243,4 +243,96 @@ describe('runSyncCycle', () => {
     expect(row.sync_cursor).toBe('cur2')
     expect(row.anchored_at).toBe(freshAnchor)
   })
+
+  it('skips the cycle entirely while another cycle holds the lock', async () => {
+    db.prepare("INSERT INTO settings (key, value) VALUES ('sync_lock', ?)").run(String(Date.now() + 60_000))
+    const g = makeFakeProvider({ changes: () => ({ events: [ev('e1')], nextCursor: 'c' }) })
+    const o = makeFakeProvider({})
+
+    const res = await runSyncCycle(deps(g.provider, o.provider))
+
+    expect(res).toEqual({ processed: 0, errors: [], skipped: true })
+    expect(g.calls).toEqual([])
+    expect(db.prepare('SELECT COUNT(*) AS n FROM sync_runs').get()).toEqual({ n: 0 })
+    // the foreign lock must survive a skipped cycle
+    expect(db.prepare("SELECT COUNT(*) AS n FROM settings WHERE key = 'sync_lock'").get()).toEqual({ n: 1 })
+  })
+
+  it('steals an expired lock (crashed holder) and releases its own on completion', async () => {
+    db.prepare("INSERT INTO settings (key, value) VALUES ('sync_lock', ?)").run(String(Date.now() - 1000))
+    const g = makeFakeProvider({ changes: () => ({ events: [ev('e1')], nextCursor: 'c' }) })
+    const o = makeFakeProvider({})
+
+    const res = await runSyncCycle(deps(g.provider, o.provider))
+
+    expect(res.processed).toBe(1)
+    expect(db.prepare("SELECT COUNT(*) AS n FROM settings WHERE key = 'sync_lock'").get()).toEqual({ n: 0 })
+  })
+
+  it('does not resurrect a cursor row an edit cleared mid-cycle (forced refetch survives)', async () => {
+    db.prepare("INSERT INTO sync_state (calendar_id, sync_cursor, anchored_at) VALUES (1, 'cur', datetime('now'))").run()
+    const g = makeFakeProvider({
+      changes: () => {
+        // simulate updateSyncLink racing the running cycle: it deletes the row to force a full refetch
+        db.prepare('DELETE FROM sync_state WHERE calendar_id = 1').run()
+        return { events: [], nextCursor: 'cur2' }
+      },
+    })
+    const o = makeFakeProvider({})
+
+    await runSyncCycle(deps(g.provider, o.provider))
+
+    expect(db.prepare('SELECT COUNT(*) AS n FROM sync_state WHERE calendar_id = 1').get()).toEqual({ n: 0 })
+  })
+
+  describe('janitor (google targets, full-refetch cycles)', () => {
+    function seedGoogleToGoogle(db: DB) {
+      db.prepare("INSERT INTO connections (provider, composio_connected_account_id, status) VALUES ('google', 'acc-g2', 'active')").run()
+      db.prepare("INSERT INTO calendars (connection_id, provider_calendar_id, name) VALUES (3, 'gcal2', 'Target')").run()
+      db.prepare("INSERT INTO sync_links (source_calendar_id, target_calendar_id, mode, busy_title) VALUES (1, 3, 'busy', 'Busy')").run()
+      db.prepare('DELETE FROM sync_links WHERE id = 1').run() // drop the seed's outlook link
+    }
+
+    it('deletes untracked copies that match a link write-shape, sparing user events and mapped ones', async () => {
+      seedGoogleToGoogle(db)
+      const g = makeFakeProvider({ changes: () => ({ events: [ev('e1')], nextCursor: 'c1' }) })
+      g.provider.listEvents = async () => [
+        ev('tgt-1', { title: 'Busy' }), // the mapping created this cycle
+        ev('orphan-1', { title: 'Busy', start: '2026-07-08T13:00:00+03:00', end: '2026-07-08T14:00:00+03:00' }), // same instants, offset notation
+        ev('user-1', { title: 'Dentist' }), // real user event — untouched
+      ]
+      const deleted: string[] = []
+      g.provider.deleteEvent = async (_a, _c, id) => { deleted.push(id) }
+
+      const res = await runSyncCycle(deps(g.provider, makeFakeProvider({}).provider))
+
+      expect(deleted).toEqual(['orphan-1'])
+      expect(res.processed).toBe(2) // 1 create + 1 janitor delete
+      expect(res.errors).toEqual([])
+    })
+
+    it('does not run on incremental cycles', async () => {
+      seedGoogleToGoogle(db)
+      db.prepare("INSERT INTO sync_state (calendar_id, sync_cursor, anchored_at) VALUES (1, 'cur', datetime('now'))").run()
+      const g = makeFakeProvider({ changes: () => ({ events: [], nextCursor: 'c2' }) })
+      let listed = 0
+      g.provider.listEvents = async () => { listed++; return [] }
+
+      await runSyncCycle(deps(g.provider, makeFakeProvider({}).provider))
+
+      expect(listed).toBe(0)
+    })
+
+    it('reports janitor failures without failing the link or the cursor advance', async () => {
+      seedGoogleToGoogle(db)
+      const g = makeFakeProvider({ changes: () => ({ events: [], nextCursor: 'c1' }) })
+      g.provider.listEvents = async () => { throw new Error('list boom') }
+
+      const res = await runSyncCycle(deps(g.provider, makeFakeProvider({}).provider))
+
+      expect(res.errors).toEqual(['janitor link 2: list boom'])
+      expect(db.prepare('SELECT last_error FROM sync_links WHERE id = 2').get()).toEqual({ last_error: null })
+      expect(db.prepare('SELECT sync_cursor FROM sync_state WHERE calendar_id = 1').get()).toEqual({ sync_cursor: 'c1' })
+    })
+  })
 })

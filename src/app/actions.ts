@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation'
 import { requireAuth } from '../lib/auth'
 import { refreshCalendars, startConnectionFlow } from '../lib/connections'
 import { getDb } from '../lib/db'
-import { NotFoundError } from '../lib/composio'
+import { deleteLinkEvents } from '../lib/link-cleanup'
 import { googleProvider } from '../lib/providers/google'
 import { outlookProvider } from '../lib/providers/outlook'
 import { runOnce } from '../lib/scheduler'
@@ -38,7 +38,20 @@ export async function refreshConnection(formData: FormData) {
 
 export async function deleteConnection(formData: FormData) {
   await requireAuth()
-  getDb().prepare('DELETE FROM connections WHERE id = ?').run(Number(formData.get('id')))
+  const db = getDb()
+  const id = Number(formData.get('id'))
+  // Sweep everything this account's links created (in any calendar) BEFORE the rows cascade away —
+  // best effort: if the account's auth is already broken the deletes fail and removal proceeds.
+  const links = db
+    .prepare(
+      `SELECT DISTINCT l.id FROM sync_links l
+       JOIN calendars sc ON sc.id = l.source_calendar_id
+       JOIN calendars tc ON tc.id = l.target_calendar_id
+       WHERE sc.connection_id = ? OR tc.connection_id = ?`,
+    )
+    .all(id, id) as { id: number }[]
+  await deleteLinkEvents(db, links.map((l) => l.id), providerFor)
+  db.prepare('DELETE FROM connections WHERE id = ?').run(id)
   revalidatePath('/')
 }
 
@@ -104,24 +117,10 @@ export async function deleteSyncLink(formData: FormData) {
     ? (db.prepare('SELECT id FROM sync_links WHERE pair_id = ?').all(link.pair_id) as { id: number }[]).map((r) => r.id)
     : [link.id]
 
-  for (const linkId of ids) {
-    const rows = db.prepare(
-      `SELECT m.target_event_id, tc.provider_calendar_id AS tgt_cal, tcon.provider AS tgt_provider, tcon.composio_connected_account_id AS tgt_account
-       FROM event_mappings m
-       JOIN sync_links l ON l.id = m.sync_link_id
-       JOIN calendars tc ON tc.id = l.target_calendar_id
-       JOIN connections tcon ON tcon.id = tc.connection_id
-       WHERE m.sync_link_id = ?`,
-    ).all(linkId) as { target_event_id: string; tgt_cal: string; tgt_provider: 'google' | 'outlook'; tgt_account: string }[]
-    for (const row of rows) {
-      try {
-        await providerFor(row.tgt_provider).deleteEvent(row.tgt_account, row.tgt_cal, row.target_event_id)
-      } catch (e) {
-        if (!(e instanceof NotFoundError)) console.error('cleanup failed:', e)
-      }
-    }
-    db.prepare('DELETE FROM sync_links WHERE id = ?').run(linkId)
-  }
+  const { failed } = await deleteLinkEvents(db, ids, providerFor)
+  // keep the link (and the mappings of the events that survived) so deleting again retries cleanup
+  if (failed > 0) redirect('/?error=cleanup-partial')
+  for (const linkId of ids) db.prepare('DELETE FROM sync_links WHERE id = ?').run(linkId)
   revalidatePath('/')
 }
 

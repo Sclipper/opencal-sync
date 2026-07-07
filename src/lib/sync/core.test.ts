@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '../providers/types'
-import { buildWriteEvent, contentHash, planActions } from './core'
+import { buildWriteEvent, contentHash, findOrphanTargets, planActions } from './core'
 
 function event(over: Partial<NormalizedEvent> = {}): NormalizedEvent {
   return {
@@ -147,5 +147,46 @@ describe('planActions', () => {
       const actions = planActions({ events: [], link: busyLink, mappings, isOwnEvent: () => false })
       expect(actions).toEqual([])
     })
+  })
+})
+
+describe('findOrphanTargets', () => {
+  const write = (over: Partial<import('../providers/types').WriteEvent> = {}) => ({
+    title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false, ...over,
+  })
+  const tgt = (id: string, over: Partial<NormalizedEvent> = {}) => event({ id, title: 'Busy', ...over })
+
+  it('flags unmapped events matching a write shape, sparing mapped and unrelated ones', () => {
+    const events = [
+      tgt('mapped-1'),
+      tgt('orphan-1'),
+      tgt('user-1', { title: 'Dentist' }),
+      tgt('other-time', { start: '2026-07-08T12:00:00Z', end: '2026-07-08T13:00:00Z' }),
+    ]
+    expect(findOrphanTargets(events, [write()], new Set(['mapped-1']))).toEqual(['orphan-1'])
+  })
+
+  it('matches across timezone notations (offset vs Z)', () => {
+    const events = [tgt('orphan-1', { start: '2026-07-08T13:00:00+03:00', end: '2026-07-08T14:00:00+03:00' })]
+    expect(findOrphanTargets(events, [write()], new Set())).toEqual(['orphan-1'])
+  })
+
+  it('matches all-day writes against the timed 24h events google actually creates', () => {
+    // googleProvider.createEvent writes an all-day WriteEvent as a timed event: 00:00Z + 24h
+    const events = [tgt('orphan-1', { start: '2026-07-09T00:00:00Z', end: '2026-07-10T00:00:00Z' })]
+    const w = write({ start: '2026-07-09', end: '2026-07-10', allDay: true })
+    expect(findOrphanTargets(events, [w], new Set())).toEqual(['orphan-1'])
+  })
+
+  it('matches >24h writes against their clamped 24h created form', () => {
+    // a 3-day event is created clamped to 24h — the orphan copy has the clamped end
+    const events = [tgt('orphan-1', { start: '2026-07-08T10:00:00Z', end: '2026-07-09T10:00:00Z' })]
+    const w = write({ end: '2026-07-11T10:00:00Z' })
+    expect(findOrphanTargets(events, [w], new Set())).toEqual(['orphan-1'])
+  })
+
+  it('ignores cancelled events', () => {
+    const events = [tgt('orphan-1', { status: 'cancelled' as const })]
+    expect(findOrphanTargets(events, [write()], new Set())).toEqual([])
   })
 })

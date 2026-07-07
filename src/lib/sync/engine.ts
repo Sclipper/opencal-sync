@@ -2,7 +2,7 @@ import { CursorExpiredError, NotFoundError, RateLimitError } from '../composio'
 import type { DB } from '../db'
 import type { CalendarProvider, Changes } from '../providers/types'
 import { getSetting } from '../settings'
-import { planActions, type Mapping } from './core'
+import { buildWriteEvent, findOrphanTargets, planActions, type Mapping } from './core'
 
 export type EngineDeps = {
   db: DB
@@ -38,9 +38,39 @@ const LINKS_SQL = `
   WHERE l.enabled = 1 AND scon.status = 'active' AND tcon.status = 'active'
 `
 
-export async function runSyncCycle(deps: EngineDeps): Promise<{ processed: number; errors: string[] }> {
+// Concurrent cycles double-create every event: each one sees the same missing/stale mappings
+// and writes its own copy. In-memory guards don't survive dev HMR module duplication or a second
+// process on the same DB, so the mutex lives in SQLite: an atomic upsert that only wins when the
+// held lock is absent or expired (expiry covers crashed holders).
+const LOCK_KEY = 'sync_lock'
+const LOCK_TTL_MS = 15 * 60_000
+
+function acquireLock(db: DB, nowMs: number): boolean {
+  const res = db
+    .prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE CAST(settings.value AS INTEGER) < ?`,
+    )
+    .run(LOCK_KEY, String(nowMs + LOCK_TTL_MS), nowMs)
+  return res.changes === 1
+}
+
+export async function runSyncCycle(deps: EngineDeps): Promise<{ processed: number; errors: string[]; skipped?: boolean }> {
   const { db } = deps
   const now = (deps.now ?? (() => new Date()))()
+  if (!acquireLock(db, now.getTime())) {
+    console.warn('sync cycle skipped: another cycle is already running')
+    return { processed: 0, errors: [], skipped: true }
+  }
+  try {
+    return await runSyncCycleLocked(deps, now)
+  } finally {
+    db.prepare('DELETE FROM settings WHERE key = ?').run(LOCK_KEY)
+  }
+}
+
+async function runSyncCycleLocked(deps: EngineDeps, now: Date): Promise<{ processed: number; errors: string[] }> {
+  const { db } = deps
   const startedAt = now.toISOString()
   const t0 = Date.now()
   let processed = 0
@@ -83,12 +113,14 @@ export async function runSyncCycle(deps: EngineDeps): Promise<{ processed: numbe
       let usedNullCursor = anchorStale || !cursorRow?.sync_cursor
 
       let changes: Changes
+      let rowReset = false
       try {
         try {
           changes = await provider.listChanges(src.src_account, src.src_cal, anchorStale ? null : (cursorRow?.sync_cursor ?? null), windowStart, windowEnd)
         } catch (e) {
           if (!(e instanceof CursorExpiredError)) throw e
           db.prepare('DELETE FROM sync_state WHERE calendar_id = ?').run(calendarId)
+          rowReset = true
           usedNullCursor = true
           changes = await provider.listChanges(src.src_account, src.src_cal, null, windowStart, windowEnd)
         }
@@ -108,11 +140,13 @@ export async function runSyncCycle(deps: EngineDeps): Promise<{ processed: numbe
           content_hash: string
         }[]
         const mappings = new Map<string, Mapping>(rows.map((r) => [r.source_event_id, { targetEventId: r.target_event_id, contentHash: r.content_hash }]))
+        const cfg = { mode: link.mode, busyTitle: link.busy_title, titleSuffix: link.title_suffix || undefined, eventColor: link.event_color || undefined }
+        const isOwn = (id: string) => Boolean(isOwnStmt.get(calendarId, id))
         const actions = planActions({
           events: changes.events,
-          link: { mode: link.mode, busyTitle: link.busy_title, titleSuffix: link.title_suffix || undefined, eventColor: link.event_color || undefined },
+          link: cfg,
           mappings,
-          isOwnEvent: (id) => Boolean(isOwnStmt.get(calendarId, id)),
+          isOwnEvent: isOwn,
           snapshot: changes.snapshot,
         })
 
@@ -145,15 +179,54 @@ export async function runSyncCycle(deps: EngineDeps): Promise<{ processed: numbe
           const msg = e instanceof Error ? e.message : String(e)
           errors.push(`link ${link.id}: ${msg}`)
           markLink.run(msg, link.id)
+          continue
+        }
+
+        // Janitor: on full-refetch cycles, sweep untracked copies (from crashes or past concurrent
+        // cycles) out of the target calendar. Runs after this link's actions so mappings are current.
+        // ponytail: gated to cursor-based sources (skips every-cycle outlook snapshots — call budget)
+        // and google targets (shape math mirrors google's create semantics).
+        if (usedNullCursor && !changes.snapshot && link.tgt_provider === 'google') {
+          try {
+            const mappedIds = new Set(
+              (db
+                .prepare('SELECT target_event_id FROM event_mappings m JOIN sync_links l2 ON l2.id = m.sync_link_id WHERE l2.target_calendar_id = ?')
+                .all(link.target_calendar_id) as { target_event_id: string }[]).map((r) => r.target_event_id),
+            )
+            const expected = changes.events
+              .filter((e) => e.status === 'active' && !e.transparent && !isOwn(e.id))
+              .map((e) => buildWriteEvent(e, cfg))
+            const targetEvents = await target.listEvents(link.tgt_account, link.tgt_cal, windowStart, windowEnd)
+            for (const orphanId of findOrphanTargets(targetEvents, expected, mappedIds)) {
+              try {
+                await target.deleteEvent(link.tgt_account, link.tgt_cal, orphanId)
+                processed++
+                console.warn(`janitor: removed untracked copy ${orphanId} from calendar ${link.target_calendar_id}`)
+              } catch (err) {
+                if (!(err instanceof NotFoundError)) throw err
+              }
+            }
+          } catch (e) {
+            if (e instanceof RateLimitError) throw e
+            errors.push(`janitor link ${link.id}: ${e instanceof Error ? e.message : String(e)}`)
+          }
         }
       }
 
       if (calendarOk) {
         const anchoredAt = usedNullCursor ? now.toISOString() : (cursorRow?.anchored_at ?? now.toISOString())
-        db.prepare(
-          `INSERT INTO sync_state (calendar_id, sync_cursor, anchored_at, last_synced_at) VALUES (?, ?, ?, datetime('now'))
-           ON CONFLICT(calendar_id) DO UPDATE SET sync_cursor = excluded.sync_cursor, anchored_at = excluded.anchored_at, last_synced_at = excluded.last_synced_at`,
-        ).run(calendarId, changes.nextCursor, anchoredAt)
+        if (cursorRow && !rowReset) {
+          // Optimistic write-back: an edit deletes this row mid-cycle to force a full refetch —
+          // only advance the cursor if the row still holds the value we started from.
+          db.prepare(
+            `UPDATE sync_state SET sync_cursor = ?, anchored_at = ?, last_synced_at = datetime('now')
+             WHERE calendar_id = ? AND sync_cursor IS ?`,
+          ).run(changes.nextCursor, anchoredAt, calendarId, cursorRow.sync_cursor)
+        } else {
+          db.prepare(
+            "INSERT OR IGNORE INTO sync_state (calendar_id, sync_cursor, anchored_at, last_synced_at) VALUES (?, ?, ?, datetime('now'))",
+          ).run(calendarId, changes.nextCursor, anchoredAt)
+        }
       }
     }
 

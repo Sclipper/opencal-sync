@@ -24,6 +24,7 @@ const ERRORS: Record<string, string> = {
   'readonly-target': 'The target calendar is read-only — pick one you can write to.',
   'connect-failed': 'Connecting the account failed. Check the auth config in Settings.',
   'refresh-failed': 'Re-scanning calendars failed. Try again.',
+  'cleanup-partial': 'Some synced events could not be deleted — the link was kept. Delete it again to retry.',
 }
 
 const isReadOnly = (role: string) => role === 'reader' || role === 'freeBusyReader'

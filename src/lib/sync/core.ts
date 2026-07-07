@@ -69,3 +69,39 @@ export function planActions(opts: {
   }
   return actions
 }
+
+// —— orphan janitor ————————————————————————————————————————————————
+// A concurrent cycle or a crash between createEvent and the mapping upsert leaves an untracked
+// copy in the target calendar that nothing will ever delete. On full-refetch cycles the engine
+// asks: "which active target events are NOT mapped by any link into this calendar, yet look
+// exactly like something we would have written?" — those are orphans and get deleted.
+//
+// Shape matching mirrors what googleProvider.createEvent actually produces (all-day events are
+// written as timed 24h blocks, durations are clamped to 24h) so orphans of those events still
+// match. ponytail: google-target semantics only — the engine gates the janitor accordingly.
+
+const toEpoch = (v: string) => Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T00:00:00Z` : v)
+
+function writeShapeKey(w: WriteEvent): string {
+  const start = toEpoch(w.start)
+  // mirror google.createEvent: minutes rounded, floor hours, clamp at 24h (clamped events lose their minutes)
+  const minutes = Math.max(1, Math.round((toEpoch(w.end) - start) / 60_000))
+  const rawHours = Math.floor(minutes / 60)
+  const durationMin = Math.min(24, rawHours) * 60 + (rawHours > 24 ? 0 : minutes % 60)
+  return `${w.title}|${start}|${start + durationMin * 60_000}`
+}
+
+function eventShapeKey(e: NormalizedEvent): string {
+  return `${e.title}|${toEpoch(e.start)}|${toEpoch(e.end)}`
+}
+
+export function findOrphanTargets(
+  targetEvents: NormalizedEvent[],
+  expected: WriteEvent[],
+  mappedTargetIds: Set<string>,
+): string[] {
+  const shapes = new Set(expected.map(writeShapeKey))
+  return targetEvents
+    .filter((e) => e.status === 'active' && !mappedTargetIds.has(e.id) && shapes.has(eventShapeKey(e)))
+    .map((e) => e.id)
+}

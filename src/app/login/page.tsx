@@ -5,7 +5,11 @@ import { checkPassword, createToken, SESSION_COOKIE } from '../../lib/session'
 async function login(formData: FormData) {
   'use server'
   const password = String(formData.get('password') ?? '')
-  if (!checkPassword(password)) redirect('/login?error=1')
+  if (!checkPassword(password)) {
+    // ponytail: flat 1.5s failure delay instead of per-IP rate limiting — enough to blunt brute force on a single-user app
+    await new Promise((r) => setTimeout(r, 1500))
+    redirect('/login?error=1')
+  }
   const store = await cookies()
   store.set(SESSION_COOKIE, createToken(), {
     httpOnly: true,
