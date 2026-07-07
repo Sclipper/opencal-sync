@@ -39,8 +39,9 @@ describe('outlookProvider.listChanges', () => {
     const res = await outlookProvider.listChanges('acc1', 'cal1', 'some-stale-cursor', '2026-07-07T00:00:00Z', '2026-09-05T00:00:00Z')
 
     expect(executeTool).toHaveBeenCalledWith('OUTLOOK_OUTLOOK_LIST_EVENTS', 'acc1', {
-      filter: "start/dateTime lt '2026-09-05T00:00:00' and end/dateTime gt '2026-07-07T00:00:00'",
+      filter: "start/dateTime lt '2026-09-05T00:00:00Z' and end/dateTime gt '2026-07-07T00:00:00Z'",
       top: 250,
+      skip: 0,
       expand_recurring_events: true,
     })
     expect(res.nextCursor).toBeNull()
@@ -62,6 +63,32 @@ describe('outlookProvider.listChanges', () => {
     executeTool.mockResolvedValueOnce({ response_data: { value: [] } })
     const res = await outlookProvider.listChanges('acc1', 'cal1', null, '2026-07-07T00:00:00Z', '2026-09-05T00:00:00Z')
     expect(res).toEqual({ events: [], nextCursor: null, snapshot: true })
+  })
+
+  it('paginates with skip when a page comes back full (250 items)', async () => {
+    const graphEvent = (id: string) => ({
+      id,
+      subject: 'E',
+      start: { dateTime: '2026-07-08T07:00:00.0000000', timeZone: 'UTC' },
+      end: { dateTime: '2026-07-08T07:30:00.0000000', timeZone: 'UTC' },
+    })
+    executeTool
+      .mockResolvedValueOnce({ value: Array.from({ length: 250 }, (_, i) => graphEvent(`ev${i}`)) })
+      .mockResolvedValueOnce({ value: [graphEvent('ev250')] })
+
+    const res = await outlookProvider.listChanges('acc1', 'cal1', null, '2026-07-07T00:00:00Z', '2026-09-05T00:00:00Z')
+
+    const filter = "start/dateTime lt '2026-09-05T00:00:00Z' and end/dateTime gt '2026-07-07T00:00:00Z'"
+    expect(executeTool).toHaveBeenNthCalledWith(1, 'OUTLOOK_OUTLOOK_LIST_EVENTS', 'acc1', {
+      filter, top: 250, skip: 0, expand_recurring_events: true,
+    })
+    expect(executeTool).toHaveBeenNthCalledWith(2, 'OUTLOOK_OUTLOOK_LIST_EVENTS', 'acc1', {
+      filter, top: 250, skip: 250, expand_recurring_events: true,
+    })
+    expect(executeTool).toHaveBeenCalledTimes(2)
+    expect(res.events).toHaveLength(251)
+    expect(res.events[0].id).toBe('ev0')
+    expect(res.events[250].id).toBe('ev250')
   })
 })
 
@@ -132,8 +159,9 @@ describe('outlookProvider reads', () => {
     executeTool.mockResolvedValueOnce({ value: [] })
     await outlookProvider.listEvents('acc1', 'cal1', '2026-07-07T00:00:00Z', '2026-09-05T00:00:00Z')
     expect(executeTool).toHaveBeenCalledWith('OUTLOOK_OUTLOOK_LIST_EVENTS', 'acc1', {
-      filter: "start/dateTime lt '2026-09-05T00:00:00' and end/dateTime gt '2026-07-07T00:00:00'",
+      filter: "start/dateTime lt '2026-09-05T00:00:00Z' and end/dateTime gt '2026-07-07T00:00:00Z'",
       top: 250,
+      skip: 0,
       expand_recurring_events: true,
     })
   })

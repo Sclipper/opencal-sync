@@ -34,30 +34,41 @@ function toUtcIso(value: string): string {
   return new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00Z` : value).toISOString()
 }
 
-// OUTLOOK_OUTLOOK_LIST_EVENTS / OUTLOOK_OUTLOOK_CALENDAR_CREATE_EVENT both take naive
-// datetimes (no offset/Z) — the Google-side helper of the same name does the same thing.
+// filter literals follow the schema's Z-suffixed example; createEvent's structured fields are naive per their schema
 function toNaiveUtc(value: string): string {
   return toUtcIso(value).replace(/\.\d{3}Z$/, '')
+}
+
+// Z-suffixed, seconds precision (milliseconds stripped) — matches the schema's own filter example.
+function toUtcSeconds(value: string): string {
+  return toUtcIso(value).replace(/\.\d{3}Z$/, 'Z')
 }
 
 // Composio's Outlook toolkit exposes no calendar-scoped event tool: OUTLOOK_OUTLOOK_LIST_EVENTS
 // only reads user_id's default calendar via an OData `filter` string (no calendarId param), and
 // has no delta/sync-token tool either — every call is a fresh full-window fetch.
-// ponytail: no page_token loop; 250 covers any sane window's event count.
+// Pagination is load-bearing: a truncated fetch would read as mass deletions to the snapshot
+// diff in sync/core.ts, so keep fetching while pages come back full.
+const PAGE = 250
 async function listWindow(accountId: string, windowStart: string, windowEnd: string): Promise<NormalizedEvent[]> {
-  const startNaive = toNaiveUtc(windowStart)
-  const endNaive = toNaiveUtc(windowEnd)
-  const payload = unwrap(
-    await executeTool('OUTLOOK_OUTLOOK_LIST_EVENTS', accountId, {
-      // window overlap, not containment: catch events that start before / end after the window edges
-      filter: `start/dateTime lt '${endNaive}' and end/dateTime gt '${startNaive}'`,
-      top: 250,
-      // expand recurring series into per-occurrence entries (each with a stable id),
-      // so the mapping/snapshot-diff model handles instances the same as Google.
-      expand_recurring_events: true,
-    }),
-  )
-  return (payload.value ?? []).map(mapEvent)
+  // window overlap, not containment: catch events that start before / end after the window edges
+  const filter = `start/dateTime lt '${toUtcSeconds(windowEnd)}' and end/dateTime gt '${toUtcSeconds(windowStart)}'`
+  const events: NormalizedEvent[] = []
+  for (let skip = 0; ; skip += PAGE) {
+    const payload = unwrap(
+      await executeTool('OUTLOOK_OUTLOOK_LIST_EVENTS', accountId, {
+        filter,
+        top: PAGE,
+        skip,
+        // expand recurring series into per-occurrence entries (each with a stable id),
+        // so the mapping/snapshot-diff model handles instances the same as Google.
+        expand_recurring_events: true,
+      }),
+    )
+    const page = (payload.value ?? []) as Record<string, any>[]
+    for (const item of page) events.push(mapEvent(item))
+    if (page.length < PAGE) return events
+  }
 }
 
 export const outlookProvider: CalendarProvider = {

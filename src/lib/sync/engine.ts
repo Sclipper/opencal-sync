@@ -71,6 +71,7 @@ export async function runSyncCycle(deps: EngineDeps): Promise<{ processed: numbe
     for (const [calendarId, calLinks] of bySource) {
       const src = calLinks[0]
       const provider = deps.providerFor(src.src_provider)
+      // cursorless providers (outlook) always return nextCursor null — re-anchor logic is a harmless no-op for them
       const cursorRow = db.prepare('SELECT sync_cursor, anchored_at FROM sync_state WHERE calendar_id = ?').get(calendarId) as
         | { sync_cursor: string | null; anchored_at: string | null }
         | undefined
