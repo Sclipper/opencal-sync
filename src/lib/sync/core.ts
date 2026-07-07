@@ -1,14 +1,15 @@
 import { createHash } from 'node:crypto'
 import type { NormalizedEvent, WriteEvent } from '../providers/types'
 
-export type SyncLinkConfig = { mode: 'busy' | 'clone'; busyTitle: string }
+export type SyncLinkConfig = { mode: 'busy' | 'clone'; busyTitle: string; titleSuffix?: string }
 
 export function buildWriteEvent(src: NormalizedEvent, link: SyncLinkConfig): WriteEvent {
   if (link.mode === 'busy') {
     return { title: link.busyTitle, start: src.start, end: src.end, allDay: src.allDay }
   }
+  const base = src.title || '(No title)'
   return {
-    title: src.title || '(No title)',
+    title: link.titleSuffix ? `${base} ${link.titleSuffix}` : base,
     description: src.description || undefined,
     location: src.location || undefined,
     start: src.start,

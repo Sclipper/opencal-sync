@@ -30,6 +30,20 @@ describe('buildWriteEvent', () => {
   it('clone mode falls back for empty titles', () => {
     expect(buildWriteEvent(event({ title: '' }), cloneLink).title).toBe('(No title)')
   })
+
+  it('clone mode appends the title suffix with a space', () => {
+    const link = { ...cloneLink, titleSuffix: '(Hyperion)' }
+    expect(buildWriteEvent(event(), link).title).toBe('Meeting (Hyperion)')
+    expect(buildWriteEvent(event({ title: '' }), link).title).toBe('(No title) (Hyperion)')
+  })
+
+  it('clone mode without a suffix leaves the title unchanged', () => {
+    expect(buildWriteEvent(event(), cloneLink).title).toBe('Meeting')
+  })
+
+  it('busy mode ignores the title suffix', () => {
+    expect(buildWriteEvent(event(), { ...busyLink, titleSuffix: '(Hyperion)' }).title).toBe('Busy')
+  })
 })
 
 describe('contentHash', () => {
@@ -42,6 +56,12 @@ describe('contentHash', () => {
   it('busy-mode hash ignores title/description changes on the source', () => {
     const a = contentHash(buildWriteEvent(event(), busyLink))
     expect(a).toBe(contentHash(buildWriteEvent(event({ title: 'Renamed', description: 'x' }), busyLink)))
+  })
+
+  it('clone-mode hash changes when a title suffix is added (drives recreation of existing clones)', () => {
+    const without = contentHash(buildWriteEvent(event(), cloneLink))
+    const withSuffix = contentHash(buildWriteEvent(event(), { ...cloneLink, titleSuffix: '(Hyperion)' }))
+    expect(without).not.toBe(withSuffix)
   })
 })
 

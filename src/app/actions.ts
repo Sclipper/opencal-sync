@@ -39,6 +39,7 @@ export async function createSyncLink(formData: FormData) {
   const target = Number(formData.get('target'))
   const mode = String(formData.get('mode')) === 'clone' ? 'clone' : 'busy'
   const busyTitle = String(formData.get('busy_title') || getSetting(db, 'default_busy_title', 'Busy'))
+  const titleSuffix = String(formData.get('title_suffix') ?? '').trim()
   const twoWay = formData.get('two_way') === 'on'
   if (!source || !target || source === target) redirect('/?error=same-calendar')
 
@@ -46,12 +47,12 @@ export async function createSyncLink(formData: FormData) {
   if (existingLink.get(source, target) || (twoWay && existingLink.get(target, source))) redirect('/?error=duplicate-link')
 
   const pairId = twoWay ? randomUUID() : null
-  const insert = db.prepare('INSERT INTO sync_links (source_calendar_id, target_calendar_id, mode, busy_title, pair_id) VALUES (?, ?, ?, ?, ?)')
+  const insert = db.prepare('INSERT INTO sync_links (source_calendar_id, target_calendar_id, mode, busy_title, title_suffix, pair_id) VALUES (?, ?, ?, ?, ?, ?)')
   const clearCursor = db.prepare('DELETE FROM sync_state WHERE calendar_id = ?')
-  insert.run(source, target, mode, busyTitle, pairId)
+  insert.run(source, target, mode, busyTitle, titleSuffix, pairId)
   clearCursor.run(source)
   if (twoWay) {
-    insert.run(target, source, mode, busyTitle, pairId)
+    insert.run(target, source, mode, busyTitle, titleSuffix, pairId)
     clearCursor.run(target)
   }
   revalidatePath('/')

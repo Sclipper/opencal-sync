@@ -14,6 +14,7 @@ type LinkRow = {
   id: number
   mode: 'busy' | 'clone'
   busy_title: string
+  title_suffix: string
   source_calendar_id: number
   target_calendar_id: number
   src_provider: 'google' | 'outlook'
@@ -25,7 +26,7 @@ type LinkRow = {
 }
 
 const LINKS_SQL = `
-  SELECT l.id, l.mode, l.busy_title, l.source_calendar_id, l.target_calendar_id,
+  SELECT l.id, l.mode, l.busy_title, l.title_suffix, l.source_calendar_id, l.target_calendar_id,
          sc.provider_calendar_id AS src_cal, scon.provider AS src_provider, scon.composio_connected_account_id AS src_account,
          tc.provider_calendar_id AS tgt_cal, tcon.provider AS tgt_provider, tcon.composio_connected_account_id AS tgt_account
   FROM sync_links l
@@ -108,7 +109,7 @@ export async function runSyncCycle(deps: EngineDeps): Promise<{ processed: numbe
         const mappings = new Map<string, Mapping>(rows.map((r) => [r.source_event_id, { targetEventId: r.target_event_id, contentHash: r.content_hash }]))
         const actions = planActions({
           events: changes.events,
-          link: { mode: link.mode, busyTitle: link.busy_title },
+          link: { mode: link.mode, busyTitle: link.busy_title, titleSuffix: link.title_suffix || undefined },
           mappings,
           isOwnEvent: (id) => Boolean(isOwnStmt.get(calendarId, id)),
           snapshot: changes.snapshot,

@@ -112,6 +112,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
               <option value="clone">Full clone</option>
             </select>
             <input name="busy_title" placeholder="Blocker title (Busy)" className="rounded border border-zinc-300 px-2 py-1.5" />
+            <input name="title_suffix" placeholder="Clone title suffix, e.g. (Work)" className="rounded border border-zinc-300 px-2 py-1.5" />
             <label className="flex items-center gap-2"><input type="checkbox" name="two_way" /> two-way</label>
             <button className="rounded bg-zinc-900 px-3 py-1.5 text-white">Add sync</button>
           </form>

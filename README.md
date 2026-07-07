@@ -2,7 +2,7 @@
 
 Self-hosted, open-source calendar sync — a free [OneCal](https://onecal.io) alternative you run yourself.
 
-- **Sync calendars**: mirror events between Google Calendar and Outlook accounts as privacy-safe "Busy" blockers or full clones. One-way or two-way.
+- **Sync calendars**: mirror events between Google Calendar and Outlook accounts as privacy-safe "Busy" blockers or full clones. One-way or two-way. Clones can carry an optional title suffix (e.g. "Standup (Work)") so you can tell mirrored events apart.
 - **Share availability**: a public page (`/a/your-slug`) showing your merged free slots across all calendars.
 - **Own your data**: one Docker container, SQLite inside, your own API keys. No third-party service sees your events except [Composio](https://composio.dev), which brokers the calendar APIs.
 

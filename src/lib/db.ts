@@ -14,6 +14,7 @@ export function createDb(path = ':memory:'): DB {
   for (const ddl of [
     'ALTER TABLE sync_state ADD COLUMN anchored_at TEXT',
     "ALTER TABLE connections ADD COLUMN composio_user_id TEXT NOT NULL DEFAULT 'default'",
+    "ALTER TABLE sync_links ADD COLUMN title_suffix TEXT NOT NULL DEFAULT ''",
   ]) {
     try {
       db.exec(ddl)
