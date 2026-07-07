@@ -8,7 +8,7 @@ Self-hosted, open-source calendar sync — a free [OneCal](https://onecal.io) al
 
 ## How it works
 
-opencal-sync polls your calendars every few minutes through Composio's Google Calendar and Outlook tools using incremental sync (Google syncToken / Microsoft delta queries), then creates, updates, or deletes mirrored events. A local mapping table prevents sync loops and makes every operation idempotent. Events marked "Free" never create blockers. Attendees are never copied, so nobody gets re-invited.
+opencal-sync polls your calendars every few minutes through Composio's Google Calendar and Outlook tools, then creates, updates, or deletes mirrored events. Google uses incremental sync (syncToken); Outlook has no delta/sync-token tool in Composio's toolkit, so each poll re-fetches the whole sync window and diffs it against the last-known mappings to infer deletions. A local mapping table prevents sync loops and makes every operation idempotent. Events marked "Free" never create blockers. Attendees are never copied, so nobody gets re-invited.
 
 ## Setup
 
@@ -50,9 +50,13 @@ Writes (creating/updating blockers) add calls proportional to how busy your cale
 ## Limitations (v1)
 
 - Polling only (default 5 min) — not instant. Composio triggers/webhooks are a possible future upgrade.
-- Recurring events sync as individual instances inside the sync window (default 60 days ahead). The window re-anchors with a full refetch once a day, so long-running instances stay current.
+- Google recurring events sync as individual instances inside the sync window (default 60 days ahead). The window re-anchors with a full refetch once a day, so long-running instances stay current.
+- Outlook syncs the **default calendar only** — Composio's Outlook toolkit exposes no calendar-scoped event tools (list/create only ever operate on the caller's default calendar).
+- Outlook has **no incremental sync** — Composio's toolkit has no calendar delta/sync-token tool, so every poll is a full window fetch; deletions are inferred by diffing the fetched snapshot against the last-known mappings rather than reported directly.
+- Outlook recurring events currently sync as their series master only (no occurrence-expansion tool used), so recurring Outlook series are only partially mirrored — instance-level changes/cancellations on a recurring series may not propagate.
 - Updated events are recreated (delete + create), so blocker event IDs change on edit.
-- All-day events are mirrored into Google Calendar as 24-hour timed blockers (Composio's create tool has no confirmed all-day support).
+- All-day events are mirrored as 24-hour timed blockers on both providers (Google's create tool has no confirmed all-day support; Outlook's has no `is_all_day` field at all).
+- Blocker deletions never send cancellation emails/notifications to attendees.
 - Removing a *connection* does not delete already-created blockers — delete its sync links first (that cleans up).
 - Composio's tool schemas occasionally change; if a sync fails with a parameter error, check `scripts/dump-tool-schema.mts` (see CONTRIBUTING.md) and open an issue.
 
