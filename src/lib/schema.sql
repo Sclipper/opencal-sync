@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS sync_links (
   last_error TEXT
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_links_unique_pair ON sync_links (source_calendar_id, target_calendar_id);
+
 CREATE TABLE IF NOT EXISTS event_mappings (
   id INTEGER PRIMARY KEY,
   sync_link_id INTEGER NOT NULL REFERENCES sync_links(id) ON DELETE CASCADE,

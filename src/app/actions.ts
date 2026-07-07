@@ -42,6 +42,9 @@ export async function createSyncLink(formData: FormData) {
   const twoWay = formData.get('two_way') === 'on'
   if (!source || !target || source === target) redirect('/?error=same-calendar')
 
+  const existingLink = db.prepare('SELECT 1 FROM sync_links WHERE source_calendar_id = ? AND target_calendar_id = ?')
+  if (existingLink.get(source, target) || (twoWay && existingLink.get(target, source))) redirect('/?error=duplicate-link')
+
   const pairId = twoWay ? randomUUID() : null
   const insert = db.prepare('INSERT INTO sync_links (source_calendar_id, target_calendar_id, mode, busy_title, pair_id) VALUES (?, ?, ?, ?, ?)')
   const clearCursor = db.prepare('DELETE FROM sync_state WHERE calendar_id = ?')

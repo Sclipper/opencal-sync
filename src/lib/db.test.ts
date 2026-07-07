@@ -36,6 +36,18 @@ describe('db', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_links').get()).toEqual({ n: 0 })
     expect(db.prepare('SELECT COUNT(*) AS n FROM event_mappings').get()).toEqual({ n: 0 })
   })
+
+  it('rejects duplicate sync_links for the same calendar pair', () => {
+    const db = createDb()
+    db.prepare("INSERT INTO connections (provider, status) VALUES ('google', 'active')").run()
+    db.prepare("INSERT INTO calendars (connection_id, provider_calendar_id, name) VALUES (1, 'cal1', 'Work')").run()
+    db.prepare("INSERT INTO connections (provider, status) VALUES ('outlook', 'active')").run()
+    db.prepare("INSERT INTO calendars (connection_id, provider_calendar_id, name) VALUES (2, 'cal2', 'Personal')").run()
+    db.prepare('INSERT INTO sync_links (source_calendar_id, target_calendar_id) VALUES (1, 2)').run()
+    expect(() => db.prepare('INSERT INTO sync_links (source_calendar_id, target_calendar_id) VALUES (1, 2)').run()).toThrow(
+      /UNIQUE constraint failed/,
+    )
+  })
 })
 
 describe('settings', () => {
