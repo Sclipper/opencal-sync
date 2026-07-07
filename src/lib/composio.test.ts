@@ -52,7 +52,7 @@ describe('executeTool', () => {
   })
 
   it('resolves the toolkit version at runtime and passes it through to tools.execute', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ version: '20260623_00' }) })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ meta: { version: '20260623_00' } }) })
     vi.stubGlobal('fetch', fetchMock)
     executeMock.mockResolvedValueOnce({ successful: true, data: { ok: true } })
 
@@ -73,7 +73,7 @@ describe('executeTool', () => {
   })
 
   it('caches the resolved version across calls for the same toolkit', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ version: '1' }) })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ meta: { version: '1' } }) })
     vi.stubGlobal('fetch', fetchMock)
     executeMock.mockResolvedValue({ successful: true, data: {} })
 

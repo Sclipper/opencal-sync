@@ -39,7 +39,7 @@ async function toolkitVersion(toolkit: string): Promise<string> {
     headers: { 'x-api-key': process.env.COMPOSIO_API_KEY ?? '' },
   })
   if (!res.ok) throw classifyError(await res.text())
-  const { version } = (await res.json()) as { version: string }
+  const { version } = ((await res.json()) as { meta: { version: string } }).meta
   toolkitVersions.set(toolkit, version)
   return version
 }
