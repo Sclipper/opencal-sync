@@ -166,6 +166,17 @@ describe('runSyncCycle', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_runs').get()).toEqual({ n: 1 })
   })
 
+  it('rethrows RateLimitError raised mid-write without advancing the cursor', async () => {
+    const g = makeFakeProvider({ changes: () => ({ events: [ev('e1')], nextCursor: 'c1' }) })
+    const o = makeFakeProvider({ failCreateWith: new RateLimitError('429') })
+
+    await expect(runSyncCycle(deps(g.provider, o.provider))).rejects.toBeInstanceOf(RateLimitError)
+    // cycle logged, cursor NOT advanced, no mapping row left behind → next cycle self-heals with a clean create
+    expect(db.prepare('SELECT COUNT(*) AS n FROM sync_runs').get()).toEqual({ n: 1 })
+    expect(db.prepare('SELECT COUNT(*) AS n FROM sync_state').get()).toEqual({ n: 0 })
+    expect(db.prepare('SELECT COUNT(*) AS n FROM event_mappings').get()).toEqual({ n: 0 })
+  })
+
   it('ignores links with inactive connections', async () => {
     db.prepare("UPDATE connections SET status = 'pending' WHERE id = 1").run()
     const g = makeFakeProvider({})
