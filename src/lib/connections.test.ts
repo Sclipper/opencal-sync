@@ -73,6 +73,31 @@ describe('completeConnectionFlow', () => {
     expect(db.prepare('SELECT status FROM connections').get()).toEqual({ status: 'error' })
   })
 
+  it('never downgrades an active connection when a duplicate callback fails late', async () => {
+    const db = createDb()
+    setSetting(db, 'google_auth_config_id', 'ac_123')
+    let call = 0
+    const composio = {
+      connectedAccounts: {
+        link: vi.fn(async () => ({ id: 'req-1', redirectUrl: 'u' })),
+        waitForConnection: vi.fn(async () => {
+          call++
+          if (call === 1) return { id: 'ca_9', status: 'ACTIVE', data: { email: 'me@gmail.com' } }
+          throw new Error('timeout')
+        }),
+      },
+    }
+    await startConnectionFlow(db, 'google', 'http://x', { composio })
+
+    // two overlapping callbacks resolve the same pending row
+    await Promise.all([
+      completeConnectionFlow(db, { composio, providerFor: () => fakeProvider }),
+      completeConnectionFlow(db, { composio, providerFor: () => fakeProvider }),
+    ])
+
+    expect(db.prepare('SELECT status FROM connections').get()).toEqual({ status: 'active' })
+  })
+
   it('is a no-op when nothing is pending', async () => {
     const db = createDb()
     await expect(completeConnectionFlow(db, {

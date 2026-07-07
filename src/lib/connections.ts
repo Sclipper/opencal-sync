@@ -43,7 +43,7 @@ export async function completeConnectionFlow(db: DB, deps: Deps = {}): Promise<v
     const account = await composio.connectedAccounts.waitForConnection(pending.composio_request_id, 120_000)
     if (account.status !== 'ACTIVE') throw new Error(`connection status: ${account.status}`)
     const label = String((account.data as Record<string, unknown> | undefined)?.email ?? `${pending.provider} account`)
-    db.prepare("UPDATE connections SET composio_connected_account_id = ?, account_label = ?, status = 'active' WHERE id = ?")
+    db.prepare("UPDATE connections SET composio_connected_account_id = ?, account_label = ?, status = 'active' WHERE id = ? AND status = 'pending'")
       .run(account.id, label, pending.id)
     const calendars = await providerFor(pending.provider).listCalendars(account.id)
     const insert = db.prepare(
@@ -51,6 +51,6 @@ export async function completeConnectionFlow(db: DB, deps: Deps = {}): Promise<v
     )
     for (const cal of calendars) insert.run(pending.id, cal.id, cal.name)
   } catch {
-    db.prepare("UPDATE connections SET status = 'error' WHERE id = ?").run(pending.id)
+    db.prepare("UPDATE connections SET status = 'error' WHERE id = ? AND status = 'pending'").run(pending.id)
   }
 }
