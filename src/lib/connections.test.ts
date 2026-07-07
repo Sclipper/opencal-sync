@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createDb } from './db'
 import { setSetting } from './settings'
-import { completeConnectionFlow, startConnectionFlow } from './connections'
+import { completeConnectionFlow, refreshCalendars, startConnectionFlow } from './connections'
 import type { CalendarProvider } from './providers/types'
 
 const fakeProvider: CalendarProvider = {
   listCalendars: vi.fn(async () => [
-    { id: 'me@gmail.com', name: 'me@gmail.com', primary: true },
+    { id: 'me@gmail.com', name: 'me@gmail.com', primary: true, accessRole: 'owner' },
     { id: 'cal-1', name: 'Work' },
   ]),
   listChanges: vi.fn(),
@@ -57,9 +57,9 @@ describe('completeConnectionFlow', () => {
     expect(db.prepare('SELECT composio_connected_account_id, account_label, composio_user_id, status FROM connections').get()).toEqual({
       composio_connected_account_id: 'ca_9', account_label: 'me@gmail.com', composio_user_id: 'default', status: 'active',
     })
-    expect(db.prepare('SELECT provider_calendar_id, name FROM calendars ORDER BY id').all()).toEqual([
-      { provider_calendar_id: 'me@gmail.com', name: 'me@gmail.com' },
-      { provider_calendar_id: 'cal-1', name: 'Work' },
+    expect(db.prepare('SELECT provider_calendar_id, name, is_primary, access_role FROM calendars ORDER BY id').all()).toEqual([
+      { provider_calendar_id: 'me@gmail.com', name: 'me@gmail.com', is_primary: 1, access_role: 'owner' },
+      { provider_calendar_id: 'cal-1', name: 'Work', is_primary: 0, access_role: '' },
     ])
   })
 
@@ -150,5 +150,39 @@ describe('completeConnectionFlow', () => {
       composio: { connectedAccounts: { link: vi.fn(), waitForConnection: vi.fn() } },
       providerFor: () => fakeProvider,
     })).resolves.toBeUndefined()
+  })
+})
+
+describe('refreshCalendars', () => {
+  it('upserts new calendars and backfills roles without deleting removed ones', async () => {
+    const db = createDb()
+    db.prepare("INSERT INTO connections (provider, composio_connected_account_id, account_label, status) VALUES ('google', 'ca_9', 'me@gmail.com', 'active')").run()
+    const connId = (db.prepare('SELECT id FROM connections').get() as { id: number }).id
+    // pre-migration row: no primary flag, no role, plus one calendar the provider no longer returns
+    db.prepare("INSERT INTO calendars (connection_id, provider_calendar_id, name) VALUES (?, 'me@gmail.com', 'me@gmail.com')").run(connId)
+    db.prepare("INSERT INTO calendars (connection_id, provider_calendar_id, name) VALUES (?, 'gone-cal', 'Old')").run(connId)
+
+    const provider = {
+      ...fakeProvider,
+      listCalendars: vi.fn(async () => [
+        { id: 'me@gmail.com', name: 'me@gmail.com', primary: true, accessRole: 'owner' },
+        { id: 'family', name: 'Family', accessRole: 'reader' },
+      ]),
+    } as unknown as CalendarProvider
+
+    await refreshCalendars(db, connId, { providerFor: () => provider })
+
+    expect(db.prepare('SELECT provider_calendar_id, is_primary, access_role FROM calendars ORDER BY id').all()).toEqual([
+      { provider_calendar_id: 'me@gmail.com', is_primary: 1, access_role: 'owner' },
+      { provider_calendar_id: 'gone-cal', is_primary: 0, access_role: '' },
+      { provider_calendar_id: 'family', is_primary: 0, access_role: 'reader' },
+    ])
+  })
+
+  it('does nothing for inactive or unknown connections', async () => {
+    const db = createDb()
+    const listCalendars = vi.fn()
+    await refreshCalendars(db, 999, { providerFor: () => ({ ...fakeProvider, listCalendars }) as unknown as CalendarProvider })
+    expect(listCalendars).not.toHaveBeenCalled()
   })
 })

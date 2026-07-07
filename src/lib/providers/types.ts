@@ -17,14 +17,17 @@ export type WriteEvent = {
   start: string
   end: string
   allDay: boolean
+  colorId?: string // google event colorId 1-11; providers without event colors ignore it
 }
+
+export type CalendarInfo = { id: string; name: string; primary?: boolean; accessRole?: string }
 
 // snapshot=true means `events` is the COMPLETE set for the window; any previously mapped
 // event absent from it was deleted (used by cursorless providers with no delta/sync-token tool).
 export type Changes = { events: NormalizedEvent[]; nextCursor: string | null; snapshot?: boolean }
 
 export interface CalendarProvider {
-  listCalendars(accountId: string): Promise<{ id: string; name: string; primary?: boolean }[]>
+  listCalendars(accountId: string): Promise<CalendarInfo[]>
   listChanges(
     accountId: string,
     calendarId: string,

@@ -18,6 +18,25 @@ type Deps = { composio?: ComposioLike; providerFor?: ProviderFor }
 
 const defaultProviderFor: ProviderFor = (p) => (p === 'google' ? googleProvider : outlookProvider)
 
+function upsertCalendars(db: DB, connectionId: number, calendars: Awaited<ReturnType<CalendarProvider['listCalendars']>>): void {
+  const upsert = db.prepare(
+    `INSERT INTO calendars (connection_id, provider_calendar_id, name, is_primary, access_role) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(connection_id, provider_calendar_id) DO UPDATE SET name = excluded.name, is_primary = excluded.is_primary, access_role = excluded.access_role`,
+  )
+  // ponytail: upsert only, never delete — a calendar vanishing from the provider list must not cascade-drop sync links
+  for (const cal of calendars) upsert.run(connectionId, cal.id, cal.name, cal.primary ? 1 : 0, cal.accessRole ?? '')
+}
+
+// Re-list calendars for an active connection: picks up newly created calendars and backfills is_primary/access_role.
+export async function refreshCalendars(db: DB, connectionId: number, deps: Deps = {}): Promise<void> {
+  const conn = db
+    .prepare("SELECT id, provider, composio_connected_account_id AS account FROM connections WHERE id = ? AND status = 'active'")
+    .get(connectionId) as { id: number; provider: 'google' | 'outlook'; account: string } | undefined
+  if (!conn) return
+  const providerFor = deps.providerFor ?? defaultProviderFor
+  upsertCalendars(db, conn.id, await providerFor(conn.provider).listCalendars(conn.account))
+}
+
 export async function startConnectionFlow(db: DB, provider: 'google' | 'outlook', baseUrl: string, deps: Deps = {}): Promise<string> {
   const authConfigId = getSetting(db, `${provider}_auth_config_id`, '')
   if (!authConfigId) throw new Error('missing-auth-config')
@@ -56,10 +75,7 @@ export async function completeConnectionFlow(db: DB, deps: Deps = {}): Promise<v
     // confirmed ACTIVE account, so activation is correct regardless of that interleaving.
     db.prepare("UPDATE connections SET composio_connected_account_id = ?, account_label = ?, composio_user_id = ?, status = 'active' WHERE id = ? AND status != 'active'")
       .run(account.id, label, USER_ID, pending.id)
-    const insert = db.prepare(
-      'INSERT INTO calendars (connection_id, provider_calendar_id, name) VALUES (?, ?, ?) ON CONFLICT(connection_id, provider_calendar_id) DO UPDATE SET name = excluded.name',
-    )
-    for (const cal of calendars) insert.run(pending.id, cal.id, cal.name)
+    upsertCalendars(db, pending.id, calendars)
   } catch {
     db.prepare("UPDATE connections SET status = 'error' WHERE id = ? AND status = 'pending'").run(pending.id)
   }

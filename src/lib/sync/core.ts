@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto'
 import type { NormalizedEvent, WriteEvent } from '../providers/types'
 
-export type SyncLinkConfig = { mode: 'busy' | 'clone'; busyTitle: string; titleSuffix?: string }
+export type SyncLinkConfig = { mode: 'busy' | 'clone'; busyTitle: string; titleSuffix?: string; eventColor?: string }
 
 export function buildWriteEvent(src: NormalizedEvent, link: SyncLinkConfig): WriteEvent {
+  const colorId = link.eventColor || undefined
   if (link.mode === 'busy') {
-    return { title: link.busyTitle, start: src.start, end: src.end, allDay: src.allDay }
+    return { title: link.busyTitle, start: src.start, end: src.end, allDay: src.allDay, ...(colorId && { colorId }) }
   }
   const base = src.title || '(No title)'
   return {
@@ -15,12 +16,14 @@ export function buildWriteEvent(src: NormalizedEvent, link: SyncLinkConfig): Wri
     start: src.start,
     end: src.end,
     allDay: src.allDay,
+    ...(colorId && { colorId }),
   }
 }
 
 export function contentHash(w: WriteEvent): string {
+  // colorId appended only when set so pre-color mappings keep their hashes (no mass recreate on upgrade)
   return createHash('sha256')
-    .update(JSON.stringify([w.title, w.description ?? '', w.location ?? '', w.start, w.end, w.allDay]))
+    .update(JSON.stringify([w.title, w.description ?? '', w.location ?? '', w.start, w.end, w.allDay, ...(w.colorId ? [w.colorId] : [])]))
     .digest('hex')
 }
 

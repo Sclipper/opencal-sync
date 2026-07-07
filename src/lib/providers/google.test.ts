@@ -1,13 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const executeTool = vi.fn()
+const proxyRequest = vi.fn()
 vi.mock('../composio', () => ({
   executeTool: (...args: unknown[]) => executeTool(...args),
+  proxyRequest: (...args: unknown[]) => proxyRequest(...args),
 }))
 
 const { googleProvider } = await import('./google')
 
-beforeEach(() => executeTool.mockReset())
+beforeEach(() => {
+  executeTool.mockReset()
+  proxyRequest.mockReset()
+})
 
 describe('googleProvider.listChanges', () => {
   it('does a full windowed fetch when cursor is null and maps events', async () => {
@@ -142,6 +147,40 @@ describe('googleProvider.createEvent', () => {
   })
 })
 
+describe('googleProvider.createEvent colors', () => {
+  it('patches colorId through the proxy after creating', async () => {
+    executeTool.mockResolvedValueOnce({ id: 'ev1' })
+    proxyRequest.mockResolvedValueOnce({})
+
+    const id = await googleProvider.createEvent('acc1', 'my cal@x.com', {
+      title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false, colorId: '7',
+    })
+
+    expect(id).toBe('ev1')
+    expect(proxyRequest).toHaveBeenCalledWith(
+      'acc1',
+      'PATCH',
+      'https://www.googleapis.com/calendar/v3/calendars/my%20cal%40x.com/events/ev1',
+      { colorId: '7' },
+    )
+  })
+
+  it('skips the proxy entirely when no colorId is set', async () => {
+    executeTool.mockResolvedValueOnce({ id: 'ev1' })
+    await googleProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false })
+    expect(proxyRequest).not.toHaveBeenCalled()
+  })
+
+  it('still returns the event id when the color patch fails', async () => {
+    executeTool.mockResolvedValueOnce({ id: 'ev1' })
+    proxyRequest.mockRejectedValueOnce(new Error('proxy down'))
+
+    await expect(
+      googleProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false, colorId: '5' }),
+    ).resolves.toBe('ev1')
+  })
+})
+
 describe('googleProvider.deleteEvent / listCalendars / listEvents', () => {
   it('deletes by calendar and event id', async () => {
     executeTool.mockResolvedValueOnce({})
@@ -149,9 +188,19 @@ describe('googleProvider.deleteEvent / listCalendars / listEvents', () => {
     expect(executeTool).toHaveBeenCalledWith('GOOGLECALENDAR_DELETE_EVENT', 'acc1', { calendar_id: 'cal1', event_id: 'ev9' })
   })
 
-  it('lists calendars', async () => {
-    executeTool.mockResolvedValueOnce({ calendars: [{ id: 'c1', summary: 'Work' }] })
-    expect(await googleProvider.listCalendars('acc1')).toEqual([{ id: 'c1', name: 'Work' }])
+  it('lists calendars with primary and access role', async () => {
+    executeTool.mockResolvedValueOnce({
+      calendars: [
+        { id: 'me@x.com', summary: 'me@x.com', primary: true, accessRole: 'owner' },
+        { id: 'c1', summary: 'Work' },
+        { id: 'hol', summary: 'Holidays', accessRole: 'reader' },
+      ],
+    })
+    expect(await googleProvider.listCalendars('acc1')).toEqual([
+      { id: 'me@x.com', name: 'me@x.com', primary: true, accessRole: 'owner' },
+      { id: 'c1', name: 'Work' },
+      { id: 'hol', name: 'Holidays', accessRole: 'reader' },
+    ])
     expect(executeTool).toHaveBeenCalledWith('GOOGLECALENDAR_LIST_CALENDARS', 'acc1', { max_results: 250 })
   })
 

@@ -146,13 +146,13 @@ describe('outlookProvider reads', () => {
         { id: 'c2', name: 'Personal', isDefaultCalendar: true },
       ],
     })
-    expect(await outlookProvider.listCalendars('acc1')).toEqual([{ id: 'c2', name: 'Personal (default)', primary: true }])
+    expect(await outlookProvider.listCalendars('acc1')).toEqual([{ id: 'c2', name: 'Personal (default)', primary: true, accessRole: 'owner' }])
     expect(executeTool).toHaveBeenCalledWith('OUTLOOK_LIST_CALENDARS', 'acc1', {})
   })
 
   it('falls back to the first calendar when none is flagged default', async () => {
     executeTool.mockResolvedValueOnce({ value: [{ id: 'c1', name: 'Calendar' }] })
-    expect(await outlookProvider.listCalendars('acc1')).toEqual([{ id: 'c1', name: 'Calendar (default)', primary: true }])
+    expect(await outlookProvider.listCalendars('acc1')).toEqual([{ id: 'c1', name: 'Calendar (default)', primary: true, accessRole: 'owner' }])
   })
 
   it('lists events in a range via the shared window helper', async () => {

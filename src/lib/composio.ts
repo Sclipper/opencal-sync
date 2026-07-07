@@ -80,3 +80,17 @@ export async function executeTool(
   if (!res.successful) throw classifyError(String(res.error ?? `Tool ${slug} failed`))
   return res.data
 }
+
+// Raw authenticated request through Composio's proxy — for provider API surface the
+// curated tools don't expose (e.g. Google event colorId, which no CREATE/PATCH tool accepts).
+export async function proxyRequest(
+  connectedAccountId: string,
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+  endpoint: string,
+  body?: unknown,
+): Promise<unknown> {
+  const res = await getComposio().tools.proxyExecute({ endpoint, method, body, connectedAccountId })
+  const status = (res as { status?: number }).status ?? 0
+  if (status >= 400) throw classifyError(`proxy ${method} ${endpoint} -> ${status}: ${JSON.stringify(res.data).slice(0, 300)}`)
+  return res.data
+}

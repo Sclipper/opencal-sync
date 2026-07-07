@@ -44,6 +44,16 @@ describe('buildWriteEvent', () => {
   it('busy mode ignores the title suffix', () => {
     expect(buildWriteEvent(event(), { ...busyLink, titleSuffix: '(Hyperion)' }).title).toBe('Busy')
   })
+
+  it('sets colorId in both modes when the link has an event color', () => {
+    expect(buildWriteEvent(event(), { ...busyLink, eventColor: '7' }).colorId).toBe('7')
+    expect(buildWriteEvent(event(), { ...cloneLink, eventColor: '7' }).colorId).toBe('7')
+  })
+
+  it('omits colorId entirely when the link has no event color', () => {
+    expect('colorId' in buildWriteEvent(event(), busyLink)).toBe(false)
+    expect('colorId' in buildWriteEvent(event(), { ...cloneLink, eventColor: '' })).toBe(false)
+  })
 })
 
 describe('contentHash', () => {
@@ -62,6 +72,13 @@ describe('contentHash', () => {
     const without = contentHash(buildWriteEvent(event(), cloneLink))
     const withSuffix = contentHash(buildWriteEvent(event(), { ...cloneLink, titleSuffix: '(Hyperion)' }))
     expect(without).not.toBe(withSuffix)
+  })
+
+  it('colorId changes the hash, but colorless events hash as before the color feature existed', () => {
+    const plain = buildWriteEvent(event(), busyLink)
+    expect(contentHash({ ...plain, colorId: '7' })).not.toBe(contentHash(plain))
+    // pre-color mappings must keep their hashes: explicit undefined is identical to absent
+    expect(contentHash({ ...plain, colorId: undefined })).toBe(contentHash(plain))
   })
 })
 

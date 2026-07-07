@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { requireAuth } from '../lib/auth'
-import { startConnectionFlow } from '../lib/connections'
+import { refreshCalendars, startConnectionFlow } from '../lib/connections'
 import { getDb } from '../lib/db'
 import { NotFoundError } from '../lib/composio'
 import { googleProvider } from '../lib/providers/google'
@@ -26,6 +26,16 @@ export async function connect(formData: FormData) {
   redirect(redirectUrl)
 }
 
+export async function refreshConnection(formData: FormData) {
+  await requireAuth()
+  try {
+    await refreshCalendars(getDb(), Number(formData.get('id')))
+  } catch {
+    redirect('/?error=refresh-failed')
+  }
+  revalidatePath('/')
+}
+
 export async function deleteConnection(formData: FormData) {
   await requireAuth()
   getDb().prepare('DELETE FROM connections WHERE id = ?').run(Number(formData.get('id')))
@@ -40,19 +50,26 @@ export async function createSyncLink(formData: FormData) {
   const mode = String(formData.get('mode')) === 'clone' ? 'clone' : 'busy'
   const busyTitle = String(formData.get('busy_title') || getSetting(db, 'default_busy_title', 'Busy'))
   const titleSuffix = String(formData.get('title_suffix') ?? '').trim()
+  const rawColor = String(formData.get('event_color') ?? '')
+  const eventColor = /^([1-9]|1[01])$/.test(rawColor) ? rawColor : ''
   const twoWay = formData.get('two_way') === 'on'
   if (!source || !target || source === target) redirect('/?error=same-calendar')
+
+  const readOnly = db.prepare("SELECT 1 FROM calendars WHERE id = ? AND access_role IN ('reader', 'freeBusyReader')")
+  if (readOnly.get(target) || (twoWay && readOnly.get(source))) redirect('/?error=readonly-target')
 
   const existingLink = db.prepare('SELECT 1 FROM sync_links WHERE source_calendar_id = ? AND target_calendar_id = ?')
   if (existingLink.get(source, target) || (twoWay && existingLink.get(target, source))) redirect('/?error=duplicate-link')
 
   const pairId = twoWay ? randomUUID() : null
-  const insert = db.prepare('INSERT INTO sync_links (source_calendar_id, target_calendar_id, mode, busy_title, title_suffix, pair_id) VALUES (?, ?, ?, ?, ?, ?)')
+  const insert = db.prepare(
+    'INSERT INTO sync_links (source_calendar_id, target_calendar_id, mode, busy_title, title_suffix, event_color, pair_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  )
   const clearCursor = db.prepare('DELETE FROM sync_state WHERE calendar_id = ?')
-  insert.run(source, target, mode, busyTitle, titleSuffix, pairId)
+  insert.run(source, target, mode, busyTitle, titleSuffix, eventColor, pairId)
   clearCursor.run(source)
   if (twoWay) {
-    insert.run(target, source, mode, busyTitle, titleSuffix, pairId)
+    insert.run(target, source, mode, busyTitle, titleSuffix, eventColor, pairId)
     clearCursor.run(target)
   }
   revalidatePath('/')

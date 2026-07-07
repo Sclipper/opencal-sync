@@ -1,4 +1,4 @@
-import { executeTool } from '../composio'
+import { executeTool, proxyRequest } from '../composio'
 import type { CalendarProvider, Changes, NormalizedEvent, WriteEvent } from './types'
 
 // Composio wraps some tool outputs in { response_data: ... }; tolerate both.
@@ -63,6 +63,7 @@ export const googleProvider: CalendarProvider = {
       id: String(c.id),
       name: c.summary ?? String(c.id),
       primary: c.primary === true || undefined,
+      accessRole: typeof c.accessRole === 'string' ? c.accessRole : undefined,
     }))
   },
 
@@ -97,6 +98,20 @@ export const googleProvider: CalendarProvider = {
     )
     const id = payload.id
     if (id === undefined || id === null || id === '') throw new Error('GOOGLECALENDAR_CREATE_EVENT returned no event id')
+    if (event.colorId) {
+      // No Composio Google tool accepts colorId, so patch it via the raw proxy after create.
+      // ponytail: color failure is cosmetic — never fail the sync (the event exists; failing here would loop recreates)
+      try {
+        await proxyRequest(
+          accountId,
+          'PATCH',
+          `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${String(id)}`,
+          { colorId: event.colorId },
+        )
+      } catch (e) {
+        console.error('event color patch failed:', e instanceof Error ? e.message : e)
+      }
+    }
     return String(id)
   },
 

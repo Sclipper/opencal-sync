@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS calendars (
   connection_id INTEGER NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
   provider_calendar_id TEXT NOT NULL,
   name TEXT NOT NULL,
+  is_primary INTEGER NOT NULL DEFAULT 0,
+  access_role TEXT NOT NULL DEFAULT '', -- google accessRole: owner|writer|reader|freeBusyReader; '' = unknown (pre-migration)
   UNIQUE (connection_id, provider_calendar_id)
 );
 
@@ -24,6 +26,8 @@ CREATE TABLE IF NOT EXISTS sync_links (
   mode TEXT NOT NULL DEFAULT 'busy' CHECK (mode IN ('busy', 'clone')),
   busy_title TEXT NOT NULL DEFAULT 'Busy',
   title_suffix TEXT NOT NULL DEFAULT '',
+  event_color TEXT NOT NULL DEFAULT '', -- google colorId 1-11; '' = calendar default; ignored by outlook targets
+
   pair_id TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
   last_run_at TEXT,
