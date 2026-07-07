@@ -16,6 +16,7 @@ export function createToken(ttlMs = 30 * 86_400_000, now = Date.now()): string {
 }
 
 export function verifyToken(token: string, now = Date.now()): boolean {
+  if (!process.env.ADMIN_PASSWORD) return false
   const [exp, sig] = token.split('.')
   if (!exp || !sig || !/^\d+$/.test(exp) || Number(exp) < now) return false
   const expected = sign(exp)

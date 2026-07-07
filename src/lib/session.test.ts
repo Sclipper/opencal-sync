@@ -27,6 +27,12 @@ describe('session', () => {
     expect(verifyToken(token)).toBe(false)
   })
 
+  it('rejects all tokens when ADMIN_PASSWORD is unset', () => {
+    const token = createToken()
+    delete process.env.ADMIN_PASSWORD
+    expect(verifyToken(token)).toBe(false)
+  })
+
   it('checks password in constant time', () => {
     expect(checkPassword('hunter2')).toBe(true)
     expect(checkPassword('wrong')).toBe(false)
