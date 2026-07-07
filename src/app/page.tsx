@@ -1,7 +1,7 @@
 import { requireAuth } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { GOOGLE_EVENT_COLORS, COLOR_HEX } from '../lib/event-colors'
-import { connect, createSyncLink, deleteConnection, deleteSyncLink, refreshConnection, syncNow } from './actions'
+import { connect, createSyncLink, deleteConnection, deleteSyncLink, refreshConnection, syncNow, updateSyncLink } from './actions'
 import { Masthead } from './masthead'
 
 export const dynamic = 'force-dynamic'
@@ -12,7 +12,8 @@ type CalendarRow = {
   connection_id: number; account_label: string; provider: string
 }
 type LinkRow = {
-  id: number; mode: string; pair_id: string | null; event_color: string; title_suffix: string; last_error: string | null
+  id: number; mode: string; pair_id: string | null; event_color: string; title_suffix: string; busy_title: string
+  last_run_at: string | null; last_error: string | null
   src_name: string; src_label: string; tgt_name: string; tgt_label: string
 }
 type RunRow = { started_at: string; duration_ms: number; events_processed: number; errors: string | null }
@@ -30,6 +31,31 @@ const isReadOnly = (role: string) => role === 'reader' || role === 'freeBusyRead
 const runTime = new Intl.DateTimeFormat('en-GB', {
   day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit',
 })
+
+const syncTime = new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+
+// sync_links.last_run_at is SQLite datetime('now'): "YYYY-MM-DD HH:MM:SS" in UTC, no zone marker
+const formatLastSync = (v: string | null) => (v ? syncTime.format(new Date(`${v.replace(' ', 'T')}Z`)) : null)
+
+function ColorSwatches({ current }: { current: string }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 pt-1">
+      <input type="radio" name="event_color" value="" defaultChecked={!current} className="swatch swatch-none" title="Calendar default" />
+      {GOOGLE_EVENT_COLORS.map((c) => (
+        <input
+          key={c.id}
+          type="radio"
+          name="event_color"
+          value={c.id}
+          defaultChecked={current === c.id}
+          className="swatch"
+          style={{ ['--c' as string]: c.hex }}
+          title={c.name}
+        />
+      ))}
+    </div>
+  )
+}
 
 function CalendarOptions({ calendars, writableOnly }: { calendars: CalendarRow[]; writableOnly?: boolean }) {
   const byConnection = new Map<number, CalendarRow[]>()
@@ -64,7 +90,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
      ORDER BY con.id, c.is_primary DESC, (c.access_role IN ('reader', 'freeBusyReader')), c.name`,
   ).all() as CalendarRow[]
   const links = db.prepare(
-    `SELECT l.id, l.mode, l.pair_id, l.event_color, l.title_suffix, l.last_error,
+    `SELECT l.id, l.mode, l.pair_id, l.event_color, l.title_suffix, l.busy_title, l.last_run_at, l.last_error,
             sc.name AS src_name, scon.account_label AS src_label, tc.name AS tgt_name, tcon.account_label AS tgt_label
      FROM sync_links l
      JOIN calendars sc ON sc.id = l.source_calendar_id JOIN connections scon ON scon.id = sc.connection_id
@@ -177,6 +203,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                     </div>
                   </div>
                   <div className="flex items-center gap-2.5">
+                    <span className="overline hidden sm:inline" title="Last synced">
+                      {formatLastSync(l.last_run_at) ?? 'never synced'}
+                    </span>
                     {l.event_color && COLOR_HEX[l.event_color] && (
                       <span
                         className="inline-block h-3.5 w-3.5 rounded-full border"
@@ -191,6 +220,39 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                       <button className="link-danger">Del</button>
                     </form>
                   </div>
+                  <details className="cal-details col-span-full">
+                    <summary>
+                      Edit<span className="overline sm:hidden"> · {formatLastSync(l.last_run_at) ?? 'never synced'}</span>
+                    </summary>
+                    <form action={updateSyncLink} className="mt-3 space-y-4 border-l-2 pl-4" style={{ borderColor: 'var(--signal)' }}>
+                      <input type="hidden" name="id" value={l.id} />
+                      <div className="grid gap-4 sm:grid-cols-3">
+                        <label className="block">
+                          <span className="lbl">Mode</span>
+                          <select name="mode" defaultValue={l.mode} className="select">
+                            <option value="busy">Busy blocker</option>
+                            <option value="clone">Full clone</option>
+                          </select>
+                        </label>
+                        <label className="block">
+                          <span className="lbl">Blocker title</span>
+                          <input name="busy_title" defaultValue={l.busy_title} className="input" />
+                        </label>
+                        <label className="block">
+                          <span className="lbl">Title suffix</span>
+                          <input name="title_suffix" defaultValue={l.title_suffix} placeholder="(Work)" className="input" />
+                        </label>
+                      </div>
+                      <div>
+                        <span className="lbl">Event color — Google targets only</span>
+                        <ColorSwatches current={l.event_color} />
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button className="btn btn-sm">Save changes</button>
+                        <span className="overline">saving rewrites this link’s events on the next sync</span>
+                      </div>
+                    </form>
+                  </details>
                   {l.last_error && (
                     <p className="banner banner-err col-span-full py-1.5 text-xs" title={l.last_error}>
                       {l.last_error.slice(0, 140)}
@@ -234,20 +296,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                 </label>
                 <div>
                   <span className="lbl">Event color — Google targets only</span>
-                  <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <input type="radio" name="event_color" value="" defaultChecked className="swatch swatch-none" title="Calendar default" />
-                    {GOOGLE_EVENT_COLORS.map((c) => (
-                      <input
-                        key={c.id}
-                        type="radio"
-                        name="event_color"
-                        value={c.id}
-                        className="swatch"
-                        style={{ ['--c' as string]: c.hex }}
-                        title={c.name}
-                      />
-                    ))}
-                  </div>
+                  <ColorSwatches current="" />
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-dashed pt-4" style={{ borderColor: 'var(--ink-25)' }}>

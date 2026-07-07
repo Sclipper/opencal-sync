@@ -75,6 +75,25 @@ export async function createSyncLink(formData: FormData) {
   revalidatePath('/')
 }
 
+export async function updateSyncLink(formData: FormData) {
+  await requireAuth()
+  const db = getDb()
+  const id = Number(formData.get('id'))
+  const link = db.prepare('SELECT source_calendar_id FROM sync_links WHERE id = ?').get(id) as { source_calendar_id: number } | undefined
+  if (!link) return
+  const mode = String(formData.get('mode')) === 'clone' ? 'clone' : 'busy'
+  const busyTitle = String(formData.get('busy_title') || getSetting(db, 'default_busy_title', 'Busy'))
+  const titleSuffix = String(formData.get('title_suffix') ?? '').trim()
+  const rawColor = String(formData.get('event_color') ?? '')
+  const eventColor = /^([1-9]|1[01])$/.test(rawColor) ? rawColor : ''
+  db.prepare('UPDATE sync_links SET mode = ?, busy_title = ?, title_suffix = ?, event_color = ? WHERE id = ?')
+    .run(mode, busyTitle, titleSuffix, eventColor, id)
+  // force a full windowed refetch so the new config reaches ALL events next cycle,
+  // not just ones the incremental cursor happens to report (hash mismatch drives the rewrite)
+  db.prepare('DELETE FROM sync_state WHERE calendar_id = ?').run(link.source_calendar_id)
+  revalidatePath('/')
+}
+
 export async function deleteSyncLink(formData: FormData) {
   await requireAuth()
   const db = getDb()
