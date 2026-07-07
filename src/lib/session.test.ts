@@ -28,8 +28,8 @@ describe('session', () => {
   })
 
   it('rejects all tokens when ADMIN_PASSWORD is unset', () => {
-    const token = createToken()
     delete process.env.ADMIN_PASSWORD
+    const token = createToken()
     expect(verifyToken(token)).toBe(false)
   })
 
