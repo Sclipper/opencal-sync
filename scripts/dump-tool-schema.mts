@@ -1,9 +1,9 @@
-// Usage: COMPOSIO_API_KEY=... npx tsx scripts/dump-tool-schema.ts GOOGLECALENDAR_CREATE_EVENT
+// Usage: COMPOSIO_API_KEY=... npx tsx scripts/dump-tool-schema.mts GOOGLECALENDAR_CREATE_EVENT
 export {}
 
 const slug = process.argv[2]
 if (!slug || !process.env.COMPOSIO_API_KEY) {
-  console.error('Usage: COMPOSIO_API_KEY=... npx tsx scripts/dump-tool-schema.ts <TOOL_SLUG>')
+  console.error('Usage: COMPOSIO_API_KEY=... npx tsx scripts/dump-tool-schema.mts <TOOL_SLUG>')
   process.exit(1)
 }
 

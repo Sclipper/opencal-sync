@@ -54,7 +54,7 @@ Writes (creating/updating blockers) add calls proportional to how busy your cale
 - Updated events are recreated (delete + create), so blocker event IDs change on edit.
 - All-day events are mirrored into Google Calendar as 24-hour timed blockers (Composio's create tool has no confirmed all-day support).
 - Removing a *connection* does not delete already-created blockers — delete its sync links first (that cleans up).
-- Composio's tool schemas occasionally change; if a sync fails with a parameter error, check `scripts/dump-tool-schema.ts` (see CONTRIBUTING.md) and open an issue.
+- Composio's tool schemas occasionally change; if a sync fails with a parameter error, check `scripts/dump-tool-schema.mts` (see CONTRIBUTING.md) and open an issue.
 
 ## Development
 

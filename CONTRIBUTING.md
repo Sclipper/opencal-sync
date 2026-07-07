@@ -8,4 +8,4 @@ PRs welcome. Before opening one:
 4. New sync logic needs a unit test (see `src/lib/sync/*.test.ts` for the style).
 
 To verify a Composio tool's live parameter schema against the code:
-`COMPOSIO_API_KEY=... npx tsx scripts/dump-tool-schema.ts GOOGLECALENDAR_CREATE_EVENT`
+`COMPOSIO_API_KEY=... npx tsx scripts/dump-tool-schema.mts GOOGLECALENDAR_CREATE_EVENT`
