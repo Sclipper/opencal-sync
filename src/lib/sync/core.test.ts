@@ -88,4 +88,27 @@ describe('planActions', () => {
     ])
     expect(planActions({ events: [event({ transparent: true })], link: busyLink, mappings: new Map(), isOwnEvent: () => false })).toEqual([])
   })
+
+  describe('snapshot mode (cursorless providers)', () => {
+    it('deletes a mapping whose event is absent from the snapshot', () => {
+      const mappings = new Map([
+        ['src1', { targetEventId: 'tgt1', contentHash: hash(event()) }],
+        ['gone', { targetEventId: 'tgt-gone', contentHash: 'h' }],
+      ])
+      const actions = planActions({ events: [event()], link: busyLink, mappings, isOwnEvent: () => false, snapshot: true })
+      expect(actions).toEqual([{ type: 'delete', sourceEventId: 'gone', targetEventId: 'tgt-gone' }])
+    })
+
+    it('skips mass-delete when the snapshot is empty but mappings exist (likely API hiccup)', () => {
+      const mappings = new Map([['src1', { targetEventId: 'tgt1', contentHash: 'h' }]])
+      const actions = planActions({ events: [], link: busyLink, mappings, isOwnEvent: () => false, snapshot: true })
+      expect(actions).toEqual([])
+    })
+
+    it('does not synthesize deletes for absent mappings outside snapshot mode', () => {
+      const mappings = new Map([['gone', { targetEventId: 'tgt-gone', contentHash: 'h' }]])
+      const actions = planActions({ events: [], link: busyLink, mappings, isOwnEvent: () => false })
+      expect(actions).toEqual([])
+    })
+  })
 })

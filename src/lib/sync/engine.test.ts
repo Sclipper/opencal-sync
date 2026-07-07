@@ -15,7 +15,7 @@ function ev(id: string, over: Partial<NormalizedEvent> = {}): NormalizedEvent {
 type FakeCall = { method: string; args: unknown[] }
 
 function makeFakeProvider(script: {
-  changes?: (cursor: string | null) => { events: NormalizedEvent[]; nextCursor: string | null }
+  changes?: (cursor: string | null) => { events: NormalizedEvent[]; nextCursor: string | null; snapshot?: boolean }
   createId?: () => string
   failCreateWith?: Error
   failChangesWith?: Error
@@ -104,6 +104,25 @@ describe('runSyncCycle', () => {
     expect(res.processed).toBe(2)
     expect(o.calls.map((c) => c.method)).toEqual(['deleteEvent', 'createEvent', 'deleteEvent'])
     expect(db.prepare('SELECT COUNT(*) AS n FROM event_mappings').get()).toEqual({ n: 1 })
+  })
+
+  it('deletes a blocker whose source event vanished between two snapshot polls', async () => {
+    let phase = 0
+    const g = makeFakeProvider({
+      changes: () => (phase === 0
+        ? { events: [ev('e1'), ev('e2')], nextCursor: null, snapshot: true }
+        : { events: [ev('e1')], nextCursor: null, snapshot: true }),
+    })
+    const o = makeFakeProvider({})
+    await runSyncCycle(deps(g.provider, o.provider))
+    phase = 1
+    o.calls.length = 0
+
+    const res = await runSyncCycle(deps(g.provider, o.provider))
+
+    expect(res.processed).toBe(1)
+    expect(o.calls).toEqual([{ method: 'deleteEvent', args: ['tgt-2'] }])
+    expect(db.prepare('SELECT source_event_id FROM event_mappings').all()).toEqual([{ source_event_id: 'e1' }])
   })
 
   it('skips events created by a reverse link (loop prevention)', async () => {

@@ -110,6 +110,7 @@ export async function runSyncCycle(deps: EngineDeps): Promise<{ processed: numbe
           link: { mode: link.mode, busyTitle: link.busy_title },
           mappings,
           isOwnEvent: (id) => Boolean(isOwnStmt.get(calendarId, id)),
+          snapshot: changes.snapshot,
         })
 
         const target = deps.providerFor(link.tgt_provider)

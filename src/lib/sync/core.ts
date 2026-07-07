@@ -35,9 +35,12 @@ export function planActions(opts: {
   link: SyncLinkConfig
   mappings: Map<string, Mapping>
   isOwnEvent: (eventId: string) => boolean
+  snapshot?: boolean
 }): Action[] {
   const actions: Action[] = []
+  const seenIds = new Set<string>()
   for (const ev of opts.events) {
+    seenIds.add(ev.id)
     if (opts.isOwnEvent(ev.id)) continue
     const mapping = opts.mappings.get(ev.id)
     if (ev.status === 'cancelled' || ev.transparent) {
@@ -49,6 +52,15 @@ export function planActions(opts: {
     if (!mapping) actions.push({ type: 'create', sourceEventId: ev.id, write, hash })
     else if (mapping.contentHash !== hash) {
       actions.push({ type: 'recreate', sourceEventId: ev.id, targetEventId: mapping.targetEventId, write, hash })
+    }
+  }
+
+  if (opts.snapshot) {
+    // ponytail: empty snapshot with existing mappings smells like an API hiccup — skip mass-delete;
+    // real deletions reconcile next cycle
+    if (opts.events.length === 0 && opts.mappings.size > 0) return actions
+    for (const [sourceEventId, mapping] of opts.mappings) {
+      if (!seenIds.has(sourceEventId)) actions.push({ type: 'delete', sourceEventId, targetEventId: mapping.targetEventId })
     }
   }
   return actions

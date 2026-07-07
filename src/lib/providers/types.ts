@@ -19,7 +19,9 @@ export type WriteEvent = {
   allDay: boolean
 }
 
-export type Changes = { events: NormalizedEvent[]; nextCursor: string | null }
+// snapshot=true means `events` is the COMPLETE set for the window; any previously mapped
+// event absent from it was deleted (used by cursorless providers with no delta/sync-token tool).
+export type Changes = { events: NormalizedEvent[]; nextCursor: string | null; snapshot?: boolean }
 
 export interface CalendarProvider {
   listCalendars(accountId: string): Promise<{ id: string; name: string }[]>
