@@ -30,10 +30,15 @@ export function zonedTimeToUtc(date: string, time: string, tz: string): number {
   const [hh, mm] = time.split(':').map(Number)
   const naive = Date.UTC(y, m - 1, d, hh, mm)
   const off1 = tzOffset(tz, naive)
-  let ts = naive - off1
-  const off2 = tzOffset(tz, ts)
-  if (off2 !== off1) ts = naive - off2
-  return ts
+  const ts1 = naive - off1
+  const off2 = tzOffset(tz, ts1)
+  if (off2 === off1) return ts1
+  const ts2 = naive - off2
+  const off3 = tzOffset(tz, ts2)
+  if (off3 === off2) return ts2
+  // ponytail: wall time falls in a spring-forward gap (no consistent instant exists);
+  // clamp forward past the gap — e.g. 02:30 on a US spring-forward day → 03:30 local
+  return Math.max(ts1, ts2)
 }
 
 export type WorkingHours = { days: string[]; start: string; end: string }

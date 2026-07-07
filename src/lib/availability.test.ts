@@ -22,6 +22,14 @@ describe('zonedTimeToUtc', () => {
   it('handles UTC', () => {
     expect(zonedTimeToUtc('2026-07-08', '12:30', 'UTC')).toBe(Date.parse('2026-07-08T12:30:00Z'))
   })
+  it('clamps nonexistent spring-forward times past the gap', () => {
+    // 02:30 does not exist in New York on 2026-03-08 (clocks jump 02:00 -> 03:00)
+    expect(zonedTimeToUtc('2026-03-08', '02:30', 'America/New_York')).toBe(Date.parse('2026-03-08T07:30:00Z'))
+  })
+  it('still resolves ambiguous fall-back times to the earlier occurrence', () => {
+    // 01:30 happens twice in New York on 2026-11-01; earlier (EDT) occurrence wins
+    expect(zonedTimeToUtc('2026-11-01', '01:30', 'America/New_York')).toBe(Date.parse('2026-11-01T05:30:00Z'))
+  })
 })
 
 describe('computeFreeSlots', () => {
