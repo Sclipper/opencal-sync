@@ -1,0 +1,15 @@
+services:
+  opencal-sync:
+    build: .
+    ports:
+      - '3000:3000'
+    environment:
+      COMPOSIO_API_KEY: ${COMPOSIO_API_KEY}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      BASE_URL: ${BASE_URL:-http://localhost:3000}
+    volumes:
+      - opencal-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  opencal-data:
