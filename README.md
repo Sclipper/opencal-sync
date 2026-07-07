@@ -50,8 +50,9 @@ Writes (creating/updating blockers) add calls proportional to how busy your cale
 ## Limitations (v1)
 
 - Polling only (default 5 min) — not instant. Composio triggers/webhooks are a possible future upgrade.
-- Recurring events sync as individual instances inside the sync window (default 60 days ahead).
+- Recurring events sync as individual instances inside the sync window (default 60 days ahead). The window re-anchors with a full refetch once a day, so long-running instances stay current.
 - Updated events are recreated (delete + create), so blocker event IDs change on edit.
+- All-day events are mirrored into Google Calendar as 24-hour timed blockers (Composio's create tool has no confirmed all-day support).
 - Removing a *connection* does not delete already-created blockers — delete its sync links first (that cleans up).
 - Composio's tool schemas occasionally change; if a sync fails with a parameter error, check `scripts/dump-tool-schema.ts` (see CONTRIBUTING.md) and open an issue.
 

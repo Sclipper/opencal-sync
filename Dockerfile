@@ -15,6 +15,7 @@ ENV NODE_ENV=production DATA_DIR=/app/data PORT=3000 HOSTNAME=0.0.0.0
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/src/lib/schema.sql ./src/lib/schema.sql
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data && chown node:node /app/data
+USER node
 EXPOSE 3000
 CMD ["node", "server.js"]

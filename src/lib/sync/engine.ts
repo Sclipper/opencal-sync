@@ -47,6 +47,7 @@ export async function runSyncCycle(deps: EngineDeps): Promise<{ processed: numbe
   const finishRun = () => {
     db.prepare('INSERT INTO sync_runs (started_at, duration_ms, events_processed, errors) VALUES (?, ?, ?, ?)')
       .run(startedAt, Date.now() - t0, processed, errors.length ? JSON.stringify(errors) : null)
+    db.prepare('DELETE FROM sync_runs WHERE id NOT IN (SELECT id FROM sync_runs ORDER BY id DESC LIMIT 50)').run()
   }
 
   try {
