@@ -1,1 +1,384 @@
 @import 'tailwindcss';
+
+/* ————— Timetable design system: warm paper, ink, one signal color ————— */
+:root {
+  --paper: #f3efe5;
+  --card: #faf8f1;
+  --well: #ece6d6;
+  --ink: #1d1a14;
+  --ink-70: rgb(29 26 20 / 0.72);
+  --ink-45: rgb(29 26 20 / 0.48);
+  --ink-25: rgb(29 26 20 / 0.25);
+  --ink-12: rgb(29 26 20 / 0.13);
+  --signal: #d8451f;
+  --go: #1e7448;
+  --warn: #a97612;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans), sans-serif;
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* paper grain */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+::selection {
+  background: var(--signal);
+  color: var(--paper);
+}
+
+.mono {
+  font-family: var(--font-mono), monospace;
+}
+
+/* small uppercase machine label */
+.overline {
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-45);
+}
+
+/* ————— masthead ————— */
+.masthead {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.wordmark {
+  font-weight: 900;
+  font-stretch: 120%;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wordmark .tie {
+  color: var(--signal);
+  font-weight: 400;
+}
+
+.m-link {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(243 239 229 / 0.75);
+  text-decoration: none;
+  padding-bottom: 2px;
+  border-bottom: 1px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.m-link:hover,
+.m-link[aria-current='page'] {
+  color: var(--paper);
+  border-bottom-color: var(--signal);
+}
+
+/* ————— sections ————— */
+.sect-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  border-top: 3px solid var(--ink);
+  padding-top: 0.55rem;
+}
+
+.sect-num {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--signal);
+}
+
+.sect-title {
+  font-size: 1.05rem;
+  font-weight: 800;
+  font-stretch: 115%;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* ————— cards / tickets ————— */
+.ticket {
+  background: var(--card);
+  border: 1px solid var(--ink-25);
+  border-radius: 3px;
+  box-shadow: 4px 4px 0 rgb(29 26 20 / 0.07);
+}
+
+.ticket-dashed {
+  border-style: dashed;
+}
+
+/* ————— stamps (status chips) ————— */
+.stamp {
+  display: inline-block;
+  font-family: var(--font-mono), monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  padding: 1.5px 6px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.stamp-go { color: var(--go); }
+.stamp-warn { color: var(--warn); }
+.stamp-err { color: var(--signal); }
+.stamp-dim { color: var(--ink-45); }
+.stamp-tilt { transform: rotate(-2deg); }
+
+/* ————— buttons ————— */
+.btn,
+.btn-ghost {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  padding: 0.55rem 1rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.08s;
+}
+
+.btn {
+  background: var(--ink);
+  color: var(--paper);
+  border: 1px solid var(--ink);
+}
+
+.btn:hover { background: var(--signal); border-color: var(--signal); }
+.btn:active { transform: translateY(1px); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--ink-25);
+}
+
+.btn-ghost:hover { border-color: var(--ink); }
+
+.btn-sm { padding: 0.3rem 0.6rem; font-size: 10px; }
+
+.link-danger {
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--signal);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.3rem 0;
+}
+
+.link-danger:hover { text-decoration: underline; }
+
+/* ————— forms ————— */
+.lbl {
+  display: block;
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-70);
+  margin-bottom: 0.35rem;
+}
+
+.input,
+.select {
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--ink-25);
+  border-radius: 2px;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.875rem;
+  color: var(--ink);
+}
+
+.input::placeholder { color: var(--ink-45); }
+
+.input:focus,
+.select:focus {
+  outline: none;
+  border-color: var(--signal);
+  box-shadow: 2px 2px 0 rgb(216 69 31 / 0.25);
+}
+
+.check {
+  accent-color: var(--signal);
+  width: 15px;
+  height: 15px;
+}
+
+/* ————— color swatches (radio) ————— */
+.swatch {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--c);
+  border: 1px solid rgb(0 0 0 / 0.25);
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.swatch:hover { transform: scale(1.15); }
+
+.swatch:checked {
+  box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--ink);
+}
+
+.swatch-none {
+  background: var(--card);
+  position: relative;
+  background-image: linear-gradient(
+    135deg,
+    transparent 44%,
+    var(--signal) 44%,
+    var(--signal) 56%,
+    transparent 56%
+  );
+}
+
+/* ————— departure rows (sync links) ————— */
+.dep-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  gap: 0.9rem;
+  align-items: center;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px dashed var(--ink-25);
+}
+
+.dep-row:last-child { border-bottom: none; }
+
+.dep-arrow {
+  color: var(--signal);
+  font-weight: 900;
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+@media (max-width: 640px) {
+  .dep-row { display: block; padding: 0.9rem 1rem; }
+  .dep-row > * + * { margin-top: 0.45rem; }
+  .dep-arrow { display: inline-block; transform: rotate(90deg); }
+}
+
+/* ————— calendar list inside account cards ————— */
+.cal-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px dotted var(--ink-12);
+  font-size: 0.8rem;
+  min-width: 0;
+}
+
+.cal-row:last-child { border-bottom: none; }
+
+.role-tag {
+  font-family: var(--font-mono), monospace;
+  font-size: 8.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-45);
+  border: 1px solid var(--ink-25);
+  border-radius: 2px;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+.role-tag-primary {
+  color: var(--paper);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+details.cal-details summary {
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-70);
+}
+
+details.cal-details summary::-webkit-details-marker { display: none; }
+
+details.cal-details summary::before {
+  content: '▸ ';
+  color: var(--signal);
+}
+
+details.cal-details[open] summary::before {
+  content: '▾ ';
+}
+
+/* ————— banners ————— */
+.banner {
+  font-size: 0.85rem;
+  border: 1px solid;
+  border-radius: 2px;
+  padding: 0.6rem 0.9rem;
+}
+
+.banner-err {
+  border-color: var(--signal);
+  color: var(--signal);
+  background: rgb(216 69 31 / 0.06);
+}
+
+.banner-ok {
+  border-color: var(--go);
+  color: var(--go);
+  background: rgb(30 116 72 / 0.06);
+}
+
+/* ————— load animation ————— */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rise { animation: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.d1 { animation-delay: 0.05s; }
+.d2 { animation-delay: 0.12s; }
+.d3 { animation-delay: 0.19s; }
+.d4 { animation-delay: 0.26s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rise { animation: none; }
+}

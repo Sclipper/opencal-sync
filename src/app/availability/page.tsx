@@ -1,7 +1,7 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { requireAuth } from '../../lib/auth'
 import { getDb } from '../../lib/db'
+import { Masthead } from '../masthead'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,72 +35,113 @@ async function deletePage(formData: FormData) {
   redirect('/availability')
 }
 
-export default async function AvailabilityAdmin() {
+type CalRow = { id: number; name: string; connection_id: number; account_label: string }
+
+export default async function AvailabilityAdmin({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   await requireAuth()
+  const { error } = await searchParams
   const db = getDb()
   const pages = db.prepare('SELECT id, slug, timezone, days_ahead FROM availability_pages ORDER BY id').all() as {
     id: number; slug: string; timezone: string; days_ahead: number
   }[]
   const calendars = db.prepare(
-    `SELECT c.id, c.name, con.account_label FROM calendars c JOIN connections con ON con.id = c.connection_id WHERE con.status = 'active' ORDER BY con.id, c.name`,
-  ).all() as { id: number; name: string; account_label: string }[]
+    `SELECT c.id, c.name, c.connection_id, con.account_label
+     FROM calendars c JOIN connections con ON con.id = c.connection_id
+     WHERE con.status = 'active' ORDER BY con.id, c.is_primary DESC, c.name`,
+  ).all() as CalRow[]
+  const byConnection = new Map<number, CalRow[]>()
+  for (const c of calendars) byConnection.set(c.connection_id, [...(byConnection.get(c.connection_id) ?? []), c])
   const timezones = Intl.supportedValuesOf('timeZone')
 
   return (
-    <main className="mx-auto max-w-xl space-y-6 p-8">
-      <header className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Availability pages</h1>
-        <Link href="/" className="text-sm text-zinc-600">← Dashboard</Link>
-      </header>
-
-      <ul className="space-y-2">
-        {pages.map((p) => (
-          <li key={p.id} className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white p-4 text-sm">
-            <span>
-              <a href={`/a/${p.slug}`} className="font-medium text-blue-700 hover:underline">/a/{p.slug}</a>
-              <span className="ml-2 text-zinc-500">{p.timezone}, next {p.days_ahead} days</span>
-            </span>
-            <form action={deletePage}>
-              <input type="hidden" name="id" value={p.id} />
-              <button className="text-red-600 hover:underline">delete</button>
-            </form>
-          </li>
-        ))}
-        {pages.length === 0 && <li className="text-sm text-zinc-500">No availability pages yet.</li>}
-      </ul>
-
-      <form action={savePage} className="space-y-3 rounded-lg border border-zinc-200 bg-white p-6 text-sm">
-        <h2 className="font-medium">Create / update page</h2>
-        <input name="slug" placeholder="slug (e.g. me)" required className="w-full rounded border border-zinc-300 px-3 py-2" />
-        <fieldset>
-          <legend className="mb-1 font-medium">Calendars counted as busy</legend>
-          {calendars.map((c) => (
-            <label key={c.id} className="mr-4 inline-flex items-center gap-1">
-              <input type="checkbox" name="calendar_ids" value={c.id} /> {c.account_label}/{c.name}
-            </label>
-          ))}
-          {calendars.length === 0 && <p className="text-zinc-500">Connect calendars first.</p>}
-        </fieldset>
-        <fieldset>
-          <legend className="mb-1 font-medium">Working days</legend>
-          {WEEKDAYS.map((d) => (
-            <label key={d} className="mr-3 inline-flex items-center gap-1">
-              <input type="checkbox" name={`day_${d}`} defaultChecked={!['sat', 'sun'].includes(d)} /> {d}
-            </label>
-          ))}
-        </fieldset>
-        <div className="grid grid-cols-2 gap-2">
-          <label>Start <input type="time" name="start" defaultValue="09:00" className="w-full rounded border border-zinc-300 px-2 py-1.5" /></label>
-          <label>End <input type="time" name="end" defaultValue="17:00" className="w-full rounded border border-zinc-300 px-2 py-1.5" /></label>
-          <label>Timezone
-            <select name="timezone" defaultValue="UTC" className="w-full rounded border border-zinc-300 px-2 py-1.5">
-              {timezones.map((tz) => <option key={tz}>{tz}</option>)}
-            </select>
-          </label>
-          <label>Days ahead <input type="number" name="days_ahead" defaultValue={14} min={1} max={60} className="w-full rounded border border-zinc-300 px-2 py-1.5" /></label>
+    <>
+      <Masthead active="/availability" />
+      <main className="mx-auto max-w-xl space-y-6 px-4 py-8 sm:px-6">
+        <div className="sect-head rise">
+          <span className="sect-num">04</span>
+          <h1 className="sect-title">Availability pages</h1>
         </div>
-        <button className="rounded bg-zinc-900 px-4 py-2 text-white">Save page</button>
-      </form>
-    </main>
+        {error === 'slug' && <p className="banner banner-err rise">Give the page a slug (letters, numbers, dashes).</p>}
+
+        {pages.length > 0 && (
+          <ul className="ticket rise d1">
+            {pages.map((p) => (
+              <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-dashed px-4 py-3 text-sm last:border-b-0" style={{ borderColor: 'var(--ink-25)' }}>
+                <span className="min-w-0">
+                  <a href={`/a/${p.slug}`} className="mono font-bold underline decoration-2 underline-offset-4" style={{ textDecorationColor: 'var(--signal)' }}>
+                    /a/{p.slug}
+                  </a>
+                  <span className="overline ml-3">{p.timezone} · next {p.days_ahead} days</span>
+                </span>
+                <form action={deletePage}>
+                  <input type="hidden" name="id" value={p.id} />
+                  <button className="link-danger">Delete</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <form action={savePage} className="ticket ticket-dashed rise d2 space-y-5 p-5 sm:p-6">
+          <p className="overline" style={{ color: 'var(--signal)' }}>Create / update page</p>
+          <label className="block">
+            <span className="lbl">Slug — public URL /a/…</span>
+            <input name="slug" placeholder="me" required className="input" />
+          </label>
+
+          <fieldset>
+            <legend className="lbl">Calendars counted as busy</legend>
+            {calendars.length === 0 && <p className="overline">Connect calendars first.</p>}
+            <div className="space-y-3">
+              {[...byConnection.values()].map((group) => (
+                <div key={group[0].connection_id}>
+                  <p className="overline mb-1">{group[0].account_label}</p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                    {group.map((c) => (
+                      <label key={c.id} className="inline-flex items-center gap-1.5 text-sm">
+                        <input type="checkbox" name="calendar_ids" value={c.id} className="check" /> {c.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend className="lbl">Working days</legend>
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+              {WEEKDAYS.map((d) => (
+                <label key={d} className="mono inline-flex items-center gap-1.5 text-xs uppercase">
+                  <input type="checkbox" name={`day_${d}`} defaultChecked={!['sat', 'sun'].includes(d)} className="check" /> {d}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <div className="grid grid-cols-2 gap-4">
+            <label className="block">
+              <span className="lbl">Start</span>
+              <input type="time" name="start" defaultValue="09:00" className="input" />
+            </label>
+            <label className="block">
+              <span className="lbl">End</span>
+              <input type="time" name="end" defaultValue="17:00" className="input" />
+            </label>
+            <label className="block">
+              <span className="lbl">Timezone</span>
+              <select name="timezone" defaultValue="UTC" className="select">
+                {timezones.map((tz) => <option key={tz}>{tz}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="lbl">Days ahead</span>
+              <input type="number" name="days_ahead" defaultValue={14} min={1} max={60} className="input" />
+            </label>
+          </div>
+          <button className="btn">Save page</button>
+        </form>
+      </main>
+    </>
   )
 }
