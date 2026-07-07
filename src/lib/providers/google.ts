@@ -80,7 +80,9 @@ export const googleProvider: CalendarProvider = {
         timezone: 'UTC',
       }),
     )
-    return String(payload.id)
+    const id = payload.id
+    if (id === undefined || id === null || id === '') throw new Error('GOOGLECALENDAR_CREATE_EVENT returned no event id')
+    return String(id)
   },
 
   async deleteEvent(accountId, calendarId, eventId) {

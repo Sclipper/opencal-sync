@@ -118,6 +118,13 @@ describe('googleProvider.createEvent', () => {
       timezone: 'UTC',
     })
   })
+
+  it('throws when the create response has no id', async () => {
+    executeTool.mockResolvedValueOnce({ response_data: {} })
+    await expect(
+      googleProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false }),
+    ).rejects.toThrow('no event id')
+  })
 })
 
 describe('googleProvider.deleteEvent / listCalendars / listEvents', () => {
