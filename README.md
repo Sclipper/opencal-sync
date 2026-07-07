@@ -53,8 +53,9 @@ Writes (creating/updating blockers) add calls proportional to how busy your cale
 - Recurring events sync as individual expanded occurrences inside the sync window (default 60 days ahead) on both providers. The window re-anchors with a full refetch once a day, so long-running instances stay current.
 - Outlook syncs the **default calendar only** — Composio's Outlook toolkit exposes no calendar-scoped event tools (list/create only ever operate on the caller's default calendar).
 - Outlook has **no incremental sync** — Composio's toolkit has no calendar delta/sync-token tool, so every poll is a full window fetch; deletions are inferred by diffing the fetched snapshot against the last-known mappings rather than reported directly.
+- An Outlook event rescheduled beyond the sync window looks deleted to the snapshot diff — its blocker is removed and re-created when it re-enters the window.
 - Updated events are recreated (delete + create), so blocker event IDs change on edit.
-- All-day events are mirrored as 24-hour timed blockers on both providers (Google's create tool has no confirmed all-day support; Outlook's has no `is_all_day` field at all).
+- All-day events are mirrored as timed blockers (neither provider's create tool supports all-day events). Google additionally clamps multi-day events to a single 24-hour blocker (its create tool caps duration at 24h); Outlook mirrors the full span as one timed event.
 - Blocker deletions never send cancellation emails/notifications to attendees.
 - Removing a *connection* does not delete already-created blockers — delete its sync links first (that cleans up).
 - Composio's tool schemas occasionally change; if a sync fails with a parameter error, check `scripts/dump-tool-schema.mts` (see CONTRIBUTING.md) and open an issue.
