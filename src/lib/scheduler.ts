@@ -37,9 +37,17 @@ export async function runOnce(): Promise<{ processed: number; errors: string[] }
 export function startScheduler(): void {
   if (globalThis.__opencalTimer) return
   const tick = async () => {
-    await runOnce()
-    const interval = Number(getSetting(getDb(), 'poll_interval_minutes', '5')) * 60_000
-    globalThis.__opencalTimer = setTimeout(tick, Math.max(interval, backoffMs))
+    let delayMs = 5 * 60_000
+    try {
+      const result = await runOnce()
+      if (result.errors.length) console.error('[opencal-sync] sync errors:', result.errors)
+      const interval = Number(getSetting(getDb(), 'poll_interval_minutes', '5')) * 60_000
+      if (Number.isFinite(interval) && interval >= 60_000) delayMs = interval
+    } catch (e) {
+      // ponytail: tick must never die — reschedule with the default delay on any failure
+      console.error('[opencal-sync] scheduler tick failed:', e)
+    }
+    globalThis.__opencalTimer = setTimeout(tick, Math.max(delayMs, backoffMs))
   }
   globalThis.__opencalTimer = setTimeout(tick, 5_000)
 }
