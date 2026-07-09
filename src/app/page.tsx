@@ -12,8 +12,8 @@ type CalendarRow = {
   connection_id: number; account_label: string; provider: string
 }
 type LinkRow = {
-  id: number; mode: string; pair_id: string | null; event_color: string; title_suffix: string; busy_title: string
-  last_run_at: string | null; last_error: string | null
+  id: number; mode: string; pair_id: string | null; event_color: string; title_prefix: string; title_suffix: string; busy_title: string
+  private_copy: number; last_run_at: string | null; last_error: string | null
   src_name: string; src_label: string; tgt_name: string; tgt_label: string
 }
 type RunRow = { started_at: string; duration_ms: number; events_processed: number; errors: string | null }
@@ -91,7 +91,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
      ORDER BY con.id, c.is_primary DESC, (c.access_role IN ('reader', 'freeBusyReader')), c.name`,
   ).all() as CalendarRow[]
   const links = db.prepare(
-    `SELECT l.id, l.mode, l.pair_id, l.event_color, l.title_suffix, l.busy_title, l.last_run_at, l.last_error,
+    `SELECT l.id, l.mode, l.pair_id, l.event_color, l.title_prefix, l.title_suffix, l.busy_title, l.private_copy, l.last_run_at, l.last_error,
             sc.name AS src_name, scon.account_label AS src_label, tc.name AS tgt_name, tcon.account_label AS tgt_label
      FROM sync_links l
      JOIN calendars sc ON sc.id = l.source_calendar_id JOIN connections scon ON scon.id = sc.connection_id
@@ -200,7 +200,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                     <div className="overline truncate">{l.tgt_label}</div>
                     <div className="truncate font-semibold" title={l.tgt_name}>
                       {l.tgt_name}
-                      {l.mode === 'clone' && l.title_suffix ? <span className="overline"> {l.title_suffix}</span> : null}
+                      {l.mode === 'clone' && (l.title_prefix || l.title_suffix) ? (
+                        <span className="overline"> {[l.title_prefix, '…', l.title_suffix].filter(Boolean).join(' ')}</span>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex items-center gap-2.5">
@@ -215,6 +217,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                       />
                     )}
                     <span className="stamp stamp-dim">{l.mode}</span>
+                    {l.private_copy === 1 && <span className="stamp stamp-dim">private</span>}
                     {l.pair_id && <span className="stamp stamp-dim">2-way</span>}
                     <form action={deleteSyncLink}>
                       <input type="hidden" name="id" value={l.id} />
@@ -227,7 +230,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                     </summary>
                     <form action={updateSyncLink} className="mt-3 space-y-4 border-l-2 pl-4" style={{ borderColor: 'var(--signal)' }}>
                       <input type="hidden" name="id" value={l.id} />
-                      <div className="grid gap-4 sm:grid-cols-3">
+                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                         <label className="block">
                           <span className="lbl">Mode</span>
                           <select name="mode" defaultValue={l.mode} className="select">
@@ -235,19 +238,27 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                             <option value="clone">Full clone</option>
                           </select>
                         </label>
-                        <label className="block">
-                          <span className="lbl">Blocker title</span>
+                        <label className="busy-only block">
+                          <span className="lbl">Blocker title (busy mode)</span>
                           <input name="busy_title" defaultValue={l.busy_title} className="input" />
                         </label>
-                        <label className="block">
-                          <span className="lbl">Title suffix</span>
-                          <input name="title_suffix" defaultValue={l.title_suffix} placeholder="(Work)" className="input" />
+                        <label className="clone-only block">
+                          <span className="lbl">Title prefix (clone mode)</span>
+                          <input name="title_prefix" defaultValue={l.title_prefix} className="input" />
+                        </label>
+                        <label className="clone-only block">
+                          <span className="lbl">Title suffix (clone mode)</span>
+                          <input name="title_suffix" defaultValue={l.title_suffix} className="input" />
                         </label>
                       </div>
                       <div>
                         <span className="lbl">Event color — Google targets only</span>
                         <ColorSwatches current={l.event_color} />
                       </div>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" name="private_copy" defaultChecked={l.private_copy === 1} className="check" />
+                        Mark copies as private — viewers of shared calendars see no details
+                      </label>
                       <div className="flex flex-wrap items-center gap-3">
                         <button className="btn btn-sm">Save changes</button>
                         <span className="overline">saving rewrites this link’s events on the next sync</span>
@@ -287,13 +298,17 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                     <option value="clone">Full clone — copy details</option>
                   </select>
                 </label>
-                <label className="block">
+                <label className="busy-only block">
                   <span className="lbl">Blocker title (busy mode)</span>
                   <input name="busy_title" placeholder="Busy" className="input" />
                 </label>
-                <label className="block">
+                <label className="clone-only block">
+                  <span className="lbl">Title prefix (clone mode)</span>
+                  <input name="title_prefix" className="input" />
+                </label>
+                <label className="clone-only block">
                   <span className="lbl">Title suffix (clone mode)</span>
-                  <input name="title_suffix" placeholder="(Work)" className="input" />
+                  <input name="title_suffix" defaultValue="(copy)" className="input" />
                 </label>
                 <div>
                   <span className="lbl">Event color — Google targets only</span>
@@ -301,9 +316,14 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-dashed pt-4" style={{ borderColor: 'var(--ink-25)' }}>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" name="two_way" className="check" /> Two-way — sync both directions
-                </label>
+                <div className="flex flex-wrap gap-x-5 gap-y-1.5">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" name="two_way" className="check" /> Two-way — sync both directions
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" name="private_copy" className="check" /> Mark copies as private
+                  </label>
+                </div>
                 <button className="btn">Add sync link</button>
               </div>
             </form>
