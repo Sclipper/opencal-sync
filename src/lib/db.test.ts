@@ -57,18 +57,31 @@ describe('db', () => {
         sync_cursor TEXT,
         last_synced_at TEXT
       );
+      CREATE TABLE sync_links (
+        id INTEGER PRIMARY KEY,
+        source_calendar_id INTEGER NOT NULL,
+        target_calendar_id INTEGER NOT NULL,
+        mode TEXT NOT NULL DEFAULT 'busy',
+        busy_title TEXT NOT NULL DEFAULT 'Busy',
+        pair_id TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_run_at TEXT,
+        last_error TEXT
+      );
     `)
     legacy.close()
 
     const db = createDb(path)
     expect(() => db.prepare('SELECT composio_user_id FROM connections')).not.toThrow()
     expect(() => db.prepare('SELECT anchored_at FROM sync_state')).not.toThrow()
+    expect(() => db.prepare('SELECT title_prefix, private_copy FROM sync_links')).not.toThrow()
     db.close()
 
     // fresh dbs (columns already in schema.sql) still create cleanly
     const fresh = createDb()
     expect(() => fresh.prepare('SELECT composio_user_id FROM connections')).not.toThrow()
     expect(() => fresh.prepare('SELECT anchored_at FROM sync_state')).not.toThrow()
+    expect(() => fresh.prepare('SELECT title_prefix, private_copy FROM sync_links')).not.toThrow()
   })
 
   it('rejects duplicate sync_links for the same calendar pair', () => {
