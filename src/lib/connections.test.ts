@@ -33,7 +33,7 @@ describe('startConnectionFlow', () => {
     })
 
     expect(url).toBe('https://composio/redirect')
-    expect(link).toHaveBeenCalledWith('default', 'ac_123', { callbackUrl: 'http://localhost:3000/api/connect/callback' })
+    expect(link).toHaveBeenCalledWith('default', 'ac_123', { callbackUrl: 'http://localhost:3000/api/connect/callback', allowMultiple: true })
     expect(db.prepare('SELECT provider, composio_request_id, status FROM connections').get()).toEqual({
       provider: 'google', composio_request_id: 'req-1', status: 'pending',
     })
