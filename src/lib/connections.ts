@@ -7,7 +7,7 @@ import { getSetting } from './settings'
 
 export type ComposioLike = {
   connectedAccounts: {
-    link: (userId: string, authConfigId: string, opts: { callbackUrl: string }) => Promise<{ id: string; redirectUrl: string }>
+    link: (userId: string, authConfigId: string, opts: { callbackUrl: string; allowMultiple?: boolean }) => Promise<{ id: string; redirectUrl: string }>
     waitForConnection: (requestId: string, timeoutMs?: number) => Promise<{ id: string; status: string; data?: Record<string, unknown> }>
   }
 }
@@ -41,8 +41,11 @@ export async function startConnectionFlow(db: DB, provider: 'google' | 'outlook'
   const authConfigId = getSetting(db, `${provider}_auth_config_id`, '')
   if (!authConfigId) throw new Error('missing-auth-config')
   const composio = deps.composio ?? (getComposio() as unknown as ComposioLike)
+  // allowMultiple: several real accounts (e.g. two Google accounts) share one auth config under
+  // the single USER_ID — safe because every tool execution pins an explicit connectedAccountId.
   const request = await composio.connectedAccounts.link(USER_ID, authConfigId, {
     callbackUrl: `${baseUrl}/api/connect/callback`,
+    allowMultiple: true,
   })
   // ponytail: stale pending rows from abandoned flows are cleaned up here rather than by a job
   db.prepare("DELETE FROM connections WHERE status = 'pending' AND created_at < datetime('now', '-1 hour')").run()
