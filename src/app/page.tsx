@@ -228,7 +228,14 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                     <summary>
                       Edit<span className="overline sm:hidden"> · {formatLastSync(l.last_run_at) ?? 'never synced'}</span>
                     </summary>
-                    <form action={updateSyncLink} className="mt-3 space-y-4 border-l-2 pl-4" style={{ borderColor: 'var(--signal)' }}>
+                    {/* key: React 19 resets the form to mount-time defaults after its action runs —
+                        keying by the saved values remounts it so the reset lands on fresh data */}
+                    <form
+                      key={[l.mode, l.busy_title, l.title_prefix, l.title_suffix, l.event_color, l.private_copy].join(' ')}
+                      action={updateSyncLink}
+                      className="mt-3 space-y-4 border-l-2 pl-4"
+                      style={{ borderColor: 'var(--signal)' }}
+                    >
                       <input type="hidden" name="id" value={l.id} />
                       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                         <label className="block">
