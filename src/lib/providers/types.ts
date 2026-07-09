@@ -18,6 +18,7 @@ export type WriteEvent = {
   end: string
   allDay: boolean
   colorId?: string // google event colorId 1-11; providers without event colors ignore it
+  private?: boolean // mark the copy private at the provider; shared-calendar viewers see no details
 }
 
 export type CalendarInfo = { id: string; name: string; primary?: boolean; accessRole?: string }
