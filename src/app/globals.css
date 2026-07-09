@@ -233,6 +233,14 @@ body::before {
   height: 15px;
 }
 
+/* mode-dependent fields grey out live via :has() on the mode select — keeps forms zero-JS */
+form:has(select[name='mode'] option[value='busy']:checked) .clone-only,
+form:has(select[name='mode'] option[value='clone']:checked) .busy-only {
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
 /* ————— color swatches (radio) ————— */
 .swatch {
   appearance: none;
