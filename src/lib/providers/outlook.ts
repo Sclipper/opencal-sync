@@ -1,4 +1,4 @@
-import { executeTool } from '../composio'
+import { executeTool, proxyRequest } from '../composio'
 import type { CalendarProvider, Changes, NormalizedEvent, WriteEvent } from './types'
 
 function unwrap(data: unknown): Record<string, any> {
@@ -109,6 +109,15 @@ export const outlookProvider: CalendarProvider = {
     )
     const id = payload.id
     if (id === undefined || id === null || id === '') throw new Error('OUTLOOK_OUTLOOK_CALENDAR_CREATE_EVENT returned no event id')
+    if (event.private) {
+      // The create tool has no sensitivity field, so patch it via the raw Graph proxy after create.
+      // ponytail: privacy patch failure is cosmetic-tier — never fail the sync (the event exists; failing here would loop recreates)
+      try {
+        await proxyRequest(accountId, 'PATCH', `https://graph.microsoft.com/v1.0/me/events/${encodeURIComponent(String(id))}`, { sensitivity: 'private' })
+      } catch (e) {
+        console.error('event sensitivity patch failed:', e instanceof Error ? e.message : e)
+      }
+    }
     return String(id)
   },
 
