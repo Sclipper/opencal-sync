@@ -125,6 +125,18 @@ describe('runSyncCycle', () => {
     expect(db.prepare('SELECT source_event_id FROM event_mappings').all()).toEqual([{ source_event_id: 'e1' }])
   })
 
+  it('threads title prefix and private flag from the link row into writes', async () => {
+    db.prepare("UPDATE sync_links SET mode = 'clone', title_prefix = '[W]', title_suffix = '(copy)', private_copy = 1 WHERE id = 1").run()
+    const g = makeFakeProvider({ changes: () => ({ events: [ev('e1')], nextCursor: 'c' }) })
+    const o = makeFakeProvider({})
+
+    await runSyncCycle(deps(g.provider, o.provider))
+
+    const write = o.calls[0].args[0] as { title: string; private?: boolean }
+    expect(write.title).toBe('[W] Meeting (copy)')
+    expect(write.private).toBe(true)
+  })
+
   it('skips events created by a reverse link (loop prevention)', async () => {
     // reverse link: outlook cal 2 -> google cal 1; mapping says event "blk1" in cal 1 is ours
     db.prepare("INSERT INTO sync_links (source_calendar_id, target_calendar_id, mode, busy_title) VALUES (2, 1, 'busy', 'Busy')").run()
