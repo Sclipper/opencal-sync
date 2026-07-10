@@ -1,13 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const executeTool = vi.fn()
+const proxyRequest = vi.fn()
 vi.mock('../composio', () => ({
   executeTool: (...args: unknown[]) => executeTool(...args),
+  proxyRequest: (...args: unknown[]) => proxyRequest(...args),
 }))
 
 const { outlookProvider } = await import('./outlook')
 
-beforeEach(() => executeTool.mockReset())
+beforeEach(() => {
+  executeTool.mockReset()
+  proxyRequest.mockReset()
+})
 
 describe('outlookProvider.listChanges', () => {
   it('does a full-window snapshot fetch, maps Graph events, and ignores the cursor', async () => {
@@ -129,6 +134,30 @@ describe('outlookProvider writes', () => {
     await expect(
       outlookProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false }),
     ).rejects.toThrow('no event id')
+  })
+
+  it('patches sensitivity through the proxy for private writes', async () => {
+    executeTool.mockResolvedValueOnce({ id: 'new-p' })
+    proxyRequest.mockResolvedValueOnce({})
+    const id = await outlookProvider.createEvent('acc1', 'cal1', {
+      title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false, private: true,
+    })
+    expect(id).toBe('new-p')
+    expect(proxyRequest).toHaveBeenCalledWith('acc1', 'PATCH', 'https://graph.microsoft.com/v1.0/me/events/new-p', { sensitivity: 'private' })
+  })
+
+  it('skips the proxy entirely for non-private writes', async () => {
+    executeTool.mockResolvedValueOnce({ id: 'new-np' })
+    await outlookProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false })
+    expect(proxyRequest).not.toHaveBeenCalled()
+  })
+
+  it('still returns the event id when the sensitivity patch fails', async () => {
+    executeTool.mockResolvedValueOnce({ id: 'new-f' })
+    proxyRequest.mockRejectedValueOnce(new Error('proxy down'))
+    await expect(
+      outlookProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false, private: true }),
+    ).resolves.toBe('new-f')
   })
 
   it('deletes events without sending cancellation notifications', async () => {

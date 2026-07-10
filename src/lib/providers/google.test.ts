@@ -171,6 +171,14 @@ describe('googleProvider.createEvent colors', () => {
     expect(proxyRequest).not.toHaveBeenCalled()
   })
 
+  it('passes visibility private when the write is private, omits it otherwise', async () => {
+    executeTool.mockResolvedValueOnce({ id: 'ev-p' })
+    await googleProvider.createEvent('acc1', 'cal1', {
+      title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false, private: true,
+    })
+    expect(executeTool).toHaveBeenCalledWith('GOOGLECALENDAR_CREATE_EVENT', 'acc1', expect.objectContaining({ visibility: 'private' }))
+  })
+
   it('still returns the event id when the color patch fails', async () => {
     executeTool.mockResolvedValueOnce({ id: 'ev1' })
     proxyRequest.mockRejectedValueOnce(new Error('proxy down'))
