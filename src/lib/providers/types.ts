@@ -1,3 +1,5 @@
+export type Attendee = { email: string; responseStatus?: string }
+
 export type NormalizedEvent = {
   id: string
   status: 'active' | 'cancelled'
@@ -8,6 +10,10 @@ export type NormalizedEvent = {
   end: string
   allDay: boolean
   transparent: boolean // marked "Free" — never creates blockers
+  // Detail only clone mode copies; optional so providers that cannot supply it just omit it.
+  conferenceUri?: string // video join URL (Meet/Zoom/Teams)
+  attendees?: Attendee[]
+  sourceLink?: string // provider UI link to the original event
 }
 
 export type WriteEvent = {
@@ -18,6 +24,9 @@ export type WriteEvent = {
   end: string
   allDay: boolean
   colorId?: string // google event colorId 1-11; providers without event colors ignore it
+  // The source's real conference. Providers must attach this one rather than let the target
+  // account mint a new room, or the copy advertises a join link to an empty meeting.
+  conferenceUri?: string
 }
 
 export type CalendarInfo = { id: string; name: string; primary?: boolean; accessRole?: string }

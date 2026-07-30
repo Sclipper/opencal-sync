@@ -8,6 +8,7 @@ function unwrap(data: unknown): Record<string, any> {
 }
 
 function mapEvent(raw: Record<string, any>): NormalizedEvent {
+  const videoEntry = (raw.conferenceData?.entryPoints ?? []).find((p: Record<string, any>) => p.entryPointType === 'video')
   return {
     id: String(raw.id),
     status: raw.status === 'cancelled' ? 'cancelled' : 'active',
@@ -18,6 +19,29 @@ function mapEvent(raw: Record<string, any>): NormalizedEvent {
     end: raw.end?.dateTime ?? raw.end?.date ?? '',
     allDay: Boolean(raw.start?.date),
     transparent: raw.transparency === 'transparent',
+    // detail below is omitted when absent, so events without it hash as they always did
+    ...((raw.hangoutLink ?? videoEntry?.uri) && { conferenceUri: String(raw.hangoutLink ?? videoEntry.uri) }),
+    ...(attendeesOf(raw).length && { attendees: attendeesOf(raw) }),
+    ...(raw.htmlLink && { sourceLink: String(raw.htmlLink) }),
+  }
+}
+
+// rooms and equipment are attendees too — they are not "who is coming"
+function attendeesOf(raw: Record<string, any>) {
+  return (raw.attendees ?? [])
+    .filter((a: Record<string, any>) => a.email && !a.resource)
+    .map((a: Record<string, any>) => ({ email: String(a.email), responseStatus: a.responseStatus }))
+}
+
+// Google only lets us attach a Meet conference; a Zoom/Teams URL has to stay a link in the body.
+export function meetConferenceData(uri: string | undefined): Record<string, unknown> | null {
+  const code = uri?.match(/^https:\/\/meet\.google\.com\/([a-z0-9-]+)/i)?.[1]
+  if (!code) return null
+  const url = `https://meet.google.com/${code}`
+  return {
+    conferenceId: code,
+    conferenceSolution: { key: { type: 'hangoutsMeet' }, name: 'Google Meet' },
+    entryPoints: [{ entryPointType: 'video', uri: url, label: `meet.google.com/${code}` }],
   }
 }
 
@@ -98,19 +122,21 @@ export const googleProvider: CalendarProvider = {
     )
     const id = payload.id
     if (id === undefined || id === null || id === '') throw new Error('GOOGLECALENDAR_CREATE_EVENT returned no event id')
-    if (event.colorId) {
-      // No Composio Google tool accepts colorId, so patch it via the raw proxy after create.
-      // ponytail: color failure is cosmetic — never fail the sync (the event exists; failing here would loop recreates)
-      try {
-        await proxyRequest(
-          accountId,
-          'PATCH',
-          `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${String(id)}`,
-          { colorId: event.colorId },
-        )
-      } catch (e) {
-        console.error('event color patch failed:', e instanceof Error ? e.message : e)
-      }
+    // Fidelity pass over what no Composio Google tool accepts: colorId, and the conference.
+    // Accounts with "automatically add Google Meet" mint a NEW room on every event created on them,
+    // so the copy would advertise a join link to an empty meeting — always send conferenceData:
+    // the source's real Meet when there is one, null to strip whatever the account attached.
+    // ponytail: one extra call per created event; fold into create if a tool ever accepts these.
+    try {
+      await proxyRequest(
+        accountId,
+        'PATCH',
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${String(id)}?conferenceDataVersion=1`,
+        { ...(event.colorId && { colorId: event.colorId }), conferenceData: meetConferenceData(event.conferenceUri) },
+      )
+    } catch (e) {
+      // never fail the sync here — the event exists, and throwing would loop recreates forever
+      console.error('event fidelity patch failed:', e instanceof Error ? e.message : e)
     }
     return String(id)
   },

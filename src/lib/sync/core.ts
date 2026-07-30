@@ -9,21 +9,39 @@ export function buildWriteEvent(src: NormalizedEvent, link: SyncLinkConfig): Wri
     return { title: link.busyTitle, start: src.start, end: src.end, allDay: src.allDay, ...(colorId && { colorId }) }
   }
   const base = src.title || '(No title)'
+  const guests = (src.attendees ?? []).filter((a) => a.email)
+  // ponytail: guests go in the description, not as real attendees — Google propagates attendees to
+  // their calendars (sendUpdates only mutes the email), so a copy would put a phantom invite on every
+  // guest's calendar. Real RSVP chips need events.import + privateCopy; upgrade there if wanted.
+  const footer = [
+    src.conferenceUri && `Join: ${src.conferenceUri}`,
+    guests.length &&
+      `Guests: ${guests.map((a) => (a.responseStatus ? `${a.email} (${a.responseStatus})` : a.email)).join(', ')}`,
+    src.sourceLink && `Original: ${src.sourceLink}`,
+  ].filter(Boolean).join('\n')
   return {
     title: link.titleSuffix ? `${base} ${link.titleSuffix}` : base,
-    description: src.description || undefined,
+    description: [src.description, footer].filter(Boolean).join('\n\n') || undefined,
     location: src.location || undefined,
     start: src.start,
     end: src.end,
     allDay: src.allDay,
     ...(colorId && { colorId }),
+    ...(src.conferenceUri && { conferenceUri: src.conferenceUri }),
   }
 }
 
 export function contentHash(w: WriteEvent): string {
-  // colorId appended only when set so pre-color mappings keep their hashes (no mass recreate on upgrade)
+  // Optional fields are appended only when set, so mappings written before each field existed keep
+  // their hashes (no mass recreate on upgrade). Guests and the original link ride in description.
   return createHash('sha256')
-    .update(JSON.stringify([w.title, w.description ?? '', w.location ?? '', w.start, w.end, w.allDay, ...(w.colorId ? [w.colorId] : [])]))
+    .update(
+      JSON.stringify([
+        w.title, w.description ?? '', w.location ?? '', w.start, w.end, w.allDay,
+        ...(w.colorId ? [w.colorId] : []),
+        ...(w.conferenceUri ? [w.conferenceUri] : []),
+      ]),
+    )
     .digest('hex')
 }
 

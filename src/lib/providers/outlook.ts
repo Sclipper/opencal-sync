@@ -27,7 +27,17 @@ function mapEvent(raw: Record<string, any>): NormalizedEvent {
     end: raw.isAllDay ? graphDate(raw.end).slice(0, 10) : graphDate(raw.end),
     allDay: Boolean(raw.isAllDay),
     transparent: raw.showAs === 'free',
+    // detail below is omitted when absent, so events without it hash as they always did
+    ...(raw.onlineMeeting?.joinUrl && { conferenceUri: String(raw.onlineMeeting.joinUrl) }),
+    ...(guestsOf(raw).length && { attendees: guestsOf(raw) }),
+    ...(raw.webLink && { sourceLink: String(raw.webLink) }),
   }
+}
+
+function guestsOf(raw: Record<string, any>) {
+  return (raw.attendees ?? [])
+    .filter((a: Record<string, any>) => a.emailAddress?.address && a.type !== 'resource')
+    .map((a: Record<string, any>) => ({ email: String(a.emailAddress.address), responseStatus: a.status?.response }))
 }
 
 function toUtcIso(value: string): string {
