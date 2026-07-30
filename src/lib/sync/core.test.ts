@@ -20,11 +20,49 @@ describe('buildWriteEvent', () => {
     })
   })
 
-  it('clone mode copies title/description/location but never attendees', () => {
+  it('clone mode copies title/description/location', () => {
     expect(buildWriteEvent(event(), cloneLink)).toEqual({
       title: 'Meeting', description: 'notes', location: 'HQ',
       start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false,
     })
+  })
+
+  it("clone mode carries the source's real join link, guests and a link back", () => {
+    const detailed = event({
+      conferenceUri: 'https://meet.google.com/bic-rpmi-hei',
+      attendees: [{ email: 'tb@taxmate.bg', responseStatus: 'accepted' }, { email: 'sk@taxmate.bg' }],
+      sourceLink: 'https://www.google.com/calendar/event?eid=abc',
+    })
+    const write = buildWriteEvent(detailed, cloneLink)
+    expect(write.conferenceUri).toBe('https://meet.google.com/bic-rpmi-hei')
+    expect(write.description).toBe(
+      'notes\n\nJoin: https://meet.google.com/bic-rpmi-hei\n' +
+        'Guests: tb@taxmate.bg (accepted), sk@taxmate.bg\n' +
+        'Original: https://www.google.com/calendar/event?eid=abc',
+    )
+  })
+
+  it('clone mode writes only the footer when the source has no description', () => {
+    const write = buildWriteEvent(event({ description: '', sourceLink: 'https://cal/x' }), cloneLink)
+    expect(write.description).toBe('Original: https://cal/x')
+  })
+
+  it('busy mode leaks no detail — no link, no guests, no conference', () => {
+    const write = buildWriteEvent(
+      event({
+        conferenceUri: 'https://meet.google.com/bic-rpmi-hei',
+        attendees: [{ email: 'tb@taxmate.bg' }],
+        sourceLink: 'https://cal/x',
+      }),
+      busyLink,
+    )
+    expect(write).toEqual({ title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false })
+  })
+
+  it('drops rooms and equipment from the guest list', () => {
+    // resources are filtered at the provider boundary; empty emails never reach the footer
+    const write = buildWriteEvent(event({ description: '', attendees: [{ email: '' }] }), cloneLink)
+    expect(write.description).toBeUndefined()
   })
 
   it('clone mode falls back for empty titles', () => {
@@ -79,6 +117,19 @@ describe('contentHash', () => {
     expect(contentHash({ ...plain, colorId: '7' })).not.toBe(contentHash(plain))
     // pre-color mappings must keep their hashes: explicit undefined is identical to absent
     expect(contentHash({ ...plain, colorId: undefined })).toBe(contentHash(plain))
+  })
+
+  it('busy blockers hash exactly as they did before conference detail existed', () => {
+    // Pinned digest of the pre-conference payload. If this moves, every live blocker gets
+    // recreated on the next cycle — one delete + one create per mapped event.
+    expect(contentHash(buildWriteEvent(event(), busyLink)))
+      .toBe('2fa6973f22cad9ce1c0baff1b7bd68781bf5266ffddab6499d5f1759916c57a0')
+  })
+
+  it('the conference uri feeds the hash, so a copy pointing at the wrong room gets rewritten', () => {
+    const plain = buildWriteEvent(event(), cloneLink)
+    expect(contentHash({ ...plain, conferenceUri: 'https://meet.google.com/aaa-bbbb-ccc' })).not.toBe(contentHash(plain))
+    expect(contentHash({ ...plain, conferenceUri: undefined })).toBe(contentHash(plain))
   })
 })
 
