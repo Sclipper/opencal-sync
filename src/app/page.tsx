@@ -3,6 +3,7 @@ import { getDb } from '../lib/db'
 import { GOOGLE_EVENT_COLORS, COLOR_HEX } from '../lib/event-colors'
 import { connect, createSyncLink, deleteConnection, deleteSyncLink, refreshConnection, syncNow, updateSyncLink } from './actions'
 import { Masthead } from './masthead'
+import { SubmitButton } from './submit-button'
 
 export const dynamic = 'force-dynamic'
 
@@ -116,11 +117,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <div className="ml-auto flex gap-2">
               <form action={connect}>
                 <input type="hidden" name="provider" value="google" />
-                <button className="btn-ghost btn-sm">+ Google</button>
+                <SubmitButton className="btn-ghost btn-sm" pendingLabel="Connecting…">+ Google</SubmitButton>
               </form>
               <form action={connect}>
                 <input type="hidden" name="provider" value="outlook" />
-                <button className="btn-ghost btn-sm">+ Outlook</button>
+                <SubmitButton className="btn-ghost btn-sm" pendingLabel="Connecting…">+ Outlook</SubmitButton>
               </form>
             </div>
           </div>
@@ -162,12 +163,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                       {c.status === 'active' ? (
                         <form action={refreshConnection}>
                           <input type="hidden" name="id" value={c.id} />
-                          <button className="btn-ghost btn-sm">Re-scan</button>
+                          <SubmitButton className="btn-ghost btn-sm" pendingLabel="Scanning…">Re-scan</SubmitButton>
                         </form>
                       ) : <span />}
                       <form action={deleteConnection}>
                         <input type="hidden" name="id" value={c.id} />
-                        <button className="link-danger">Remove</button>
+                        <SubmitButton className="link-danger" pendingLabel="Removing…">Remove</SubmitButton>
                       </form>
                     </div>
                   </div>
@@ -183,7 +184,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <span className="sect-num">02</span>
             <h2 className="sect-title">Sync links</h2>
             <form action={syncNow} className="ml-auto">
-              <button className="btn btn-sm">Sync now</button>
+              <SubmitButton className="btn btn-sm" pendingLabel="Syncing…">Sync now</SubmitButton>
             </form>
           </div>
 
@@ -218,7 +219,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                     {l.pair_id && <span className="stamp stamp-dim">2-way</span>}
                     <form action={deleteSyncLink}>
                       <input type="hidden" name="id" value={l.id} />
-                      <button className="link-danger">Del</button>
+                      {/* ponytail: cleanup deletes one event per API call, serially — a link with
+                          many synced events takes tens of seconds; fan the deletes out if that bites */}
+                      <SubmitButton className="link-danger" pendingLabel="Deleting…">Del</SubmitButton>
                     </form>
                   </div>
                   <details className="cal-details col-span-full">
