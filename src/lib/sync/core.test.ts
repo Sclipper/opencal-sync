@@ -113,6 +113,7 @@ describe('buildWriteEvent', () => {
 })
 
 describe('contentHash', () => {
+
   it('is stable and changes when content changes', () => {
     const a = contentHash(buildWriteEvent(event(), busyLink))
     expect(a).toBe(contentHash(buildWriteEvent(event(), busyLink)))
@@ -137,11 +138,13 @@ describe('contentHash', () => {
     expect(contentHash({ ...plain, colorId: undefined })).toBe(contentHash(plain))
   })
 
-  it('busy blockers hash exactly as they did before conference detail existed', () => {
-    // Pinned digest of the pre-conference payload. If this moves, every live blocker gets
-    // recreated on the next cycle — one delete + one create per mapped event.
+  it('busy blockers hash to the pinned v2 digest', () => {
+    // Pinned digest of the busy payload. If this moves, every live blocker gets recreated on the
+    // next cycle — one delete + one create per mapped event. v1 was 2fa6973f…; v2 deliberately moved
+    // it so copies written as timed spans with default reminders get rewritten as real all-day,
+    // reminder-free events.
     expect(contentHash(buildWriteEvent(event(), busyLink)))
-      .toBe('2fa6973f22cad9ce1c0baff1b7bd68781bf5266ffddab6499d5f1759916c57a0')
+      .toBe('fdcbfd03df147d52e039952b6cd8c451a5c817df1e70086f948f12ed6c91ea59')
   })
 
   it('the conference uri feeds the hash, so a copy pointing at the wrong room gets rewritten', () => {
@@ -246,18 +249,26 @@ describe('findOrphanTargets', () => {
     expect(findOrphanTargets(events, [write()], new Set())).toEqual(['orphan-1'])
   })
 
-  it('matches all-day writes against the timed 24h events google actually creates', () => {
-    // googleProvider.createEvent writes an all-day WriteEvent as a timed event: 00:00Z + 24h
+  it('matches all-day writes against the all-day events providers now create', () => {
+    const events = [tgt('orphan-1', { start: '2026-07-09', end: '2026-07-12', allDay: true })]
+    const w = write({ start: '2026-07-09', end: '2026-07-12', allDay: true })
+    expect(findOrphanTargets(events, [w], new Set())).toEqual(['orphan-1'])
+  })
+
+  it('still matches single-day all-day writes against legacy UTC-midnight 24h timed copies', () => {
+    // copies written before all-day support were timed 00:00Z + 24h; they must stay collectable
     const events = [tgt('orphan-1', { start: '2026-07-09T00:00:00Z', end: '2026-07-10T00:00:00Z' })]
     const w = write({ start: '2026-07-09', end: '2026-07-10', allDay: true })
     expect(findOrphanTargets(events, [w], new Set())).toEqual(['orphan-1'])
   })
 
-  it('matches >24h writes against their clamped 24h created form', () => {
-    // a 3-day event is created clamped to 24h — the orphan copy has the clamped end
-    const events = [tgt('orphan-1', { start: '2026-07-08T10:00:00Z', end: '2026-07-09T10:00:00Z' })]
+  it('matches multi-day timed writes against their full span, not a clamped 24h form', () => {
+    const events = [
+      tgt('clamped', { start: '2026-07-08T10:00:00Z', end: '2026-07-09T10:00:00Z' }),
+      tgt('full', { start: '2026-07-08T10:00:00Z', end: '2026-07-11T10:00:00Z' }),
+    ]
     const w = write({ end: '2026-07-11T10:00:00Z' })
-    expect(findOrphanTargets(events, [w], new Set())).toEqual(['orphan-1'])
+    expect(findOrphanTargets(events, [w], new Set())).toEqual(['full'])
   })
 
   it('ignores cancelled events', () => {

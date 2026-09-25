@@ -44,7 +44,7 @@ function toUtcIso(value: string): string {
   return new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00Z` : value).toISOString()
 }
 
-// filter literals follow the schema's Z-suffixed example; createEvent's structured fields are naive per their schema
+// filter literals follow the schema's Z-suffixed example; Graph's structured start/end are naive + timeZone
 function toNaiveUtc(value: string): string {
   return toUtcIso(value).replace(/\.\d{3}Z$/, '')
 }
@@ -103,31 +103,27 @@ export const outlookProvider: CalendarProvider = {
   },
 
   async createEvent(accountId, _calendarId, event: WriteEvent) {
+    // Raw Graph POST rather than OUTLOOK_OUTLOOK_CALENDAR_CREATE_EVENT: the Composio tool has no
+    // isAllDay (all-day copies became 00:00Z-00:00Z timed spans, shown at 02:00 in Copenhagen) and no
+    // reminder control, so every copy fired Outlook's default 15-minute reminder on top of the original.
+    // /me/events writes to the default calendar, which is the only one listCalendars exposes anyway.
+    // All-day events must start and end at midnight in the given zone; UTC keeps them date-exact on
+    // the read side, where list results come back in UTC and are sliced to YYYY-MM-DD.
     const payload = unwrap(
-      await executeTool('OUTLOOK_OUTLOOK_CALENDAR_CREATE_EVENT', accountId, {
+      await proxyRequest(accountId, 'POST', 'https://graph.microsoft.com/v1.0/me/events', {
         subject: event.title,
-        body: event.description ?? '',
-        location: event.location,
-        // ponytail: this tool has no is_all_day field, so all-day blockers become a plain timed
-        // span; unlike Google's duration-hour schema this one takes explicit start/end datetimes,
-        // so multi-day spans need no clamp — the true instants pass through untouched.
-        start_datetime: toNaiveUtc(event.start),
-        end_datetime: toNaiveUtc(event.end),
-        time_zone: 'UTC',
-        show_as: 'busy',
+        body: { contentType: 'text', content: event.description ?? '' },
+        location: event.location ? { displayName: event.location } : undefined,
+        start: { dateTime: toNaiveUtc(event.start), timeZone: 'UTC' },
+        end: { dateTime: toNaiveUtc(event.end), timeZone: 'UTC' },
+        isAllDay: event.allDay,
+        showAs: 'busy',
+        isReminderOn: false,
+        ...(event.private && { sensitivity: 'private' }),
       }),
     )
     const id = payload.id
-    if (id === undefined || id === null || id === '') throw new Error('OUTLOOK_OUTLOOK_CALENDAR_CREATE_EVENT returned no event id')
-    if (event.private) {
-      // The create tool has no sensitivity field, so patch it via the raw Graph proxy after create.
-      // ponytail: privacy patch failure is cosmetic-tier — never fail the sync (the event exists; failing here would loop recreates)
-      try {
-        await proxyRequest(accountId, 'PATCH', `https://graph.microsoft.com/v1.0/me/events/${encodeURIComponent(String(id))}`, { sensitivity: 'private' })
-      } catch (e) {
-        console.error('event sensitivity patch failed:', e instanceof Error ? e.message : e)
-      }
-    }
+    if (id === undefined || id === null || id === '') throw new Error('graph POST /me/events returned no event id')
     return String(id)
   },
 
