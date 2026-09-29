@@ -45,15 +45,12 @@ export function meetConferenceData(uri: string | undefined): Record<string, unkn
   }
 }
 
-// For all-day WriteEvents (YYYY-MM-DD), treat the date as UTC midnight.
-// ponytail: all-day blockers are written as 24h timed events; Composio's create tool has no confirmed all-day support.
-function toUtcIso(value: string): string {
-  return new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00Z` : value).toISOString()
-}
+const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
 
-// GOOGLECALENDAR_CREATE_EVENT's start_datetime must be naive (no offset/Z) — paired with timezone: 'UTC'.
-function toNaiveUtc(value: string): string {
-  return toUtcIso(value).replace(/\.\d{3}Z$/, '')
+// Google's insert takes either { date } (all-day, YYYY-MM-DD) or { dateTime } (RFC3339). Timed instants
+// are normalised to UTC so odd source notations (Graph's 7-digit fractions, offsets) never reach the API.
+function toGoogleTime(value: string, allDay: boolean): { date: string } | { dateTime: string } {
+  return allDay && isDate(value) ? { date: value } : { dateTime: new Date(value).toISOString() }
 }
 
 async function listRange(
@@ -101,44 +98,34 @@ export const googleProvider: CalendarProvider = {
   },
 
   async createEvent(accountId, calendarId, event: WriteEvent) {
-    const startIso = toUtcIso(event.start)
-    const minutes = Math.max(1, Math.round((Date.parse(toUtcIso(event.end)) - Date.parse(startIso)) / 60_000))
-    const rawHours = Math.floor(minutes / 60)
-    const clamped = rawHours > 24
-    // ponytail: >24h events truncated to a 24h blocker; split into per-day blockers if multi-day fidelity ever matters
-    const hours = Math.min(24, rawHours)
-    const durationMinutes = clamped ? 0 : minutes % 60
+    // Raw API insert rather than GOOGLECALENDAR_CREATE_EVENT: the Composio tool can only write timed
+    // events (all-day dates became 00:00Z + 24h, i.e. 02:00-02:00 in Copenhagen), clamps anything over
+    // 24h, and has no reminders field — so every copy inherited the target calendar's default popups.
+    // Copies are mirrors of an event the user already gets notified about; they must never notify again.
+    //
+    // conferenceData is always sent: accounts with "automatically add Google Meet" mint a NEW room on
+    // every event created on them, so the copy would advertise a join link to an empty meeting. Send the
+    // source's real Meet when there is one, null to strip whatever the account would attach.
     const payload = unwrap(
-      await executeTool('GOOGLECALENDAR_CREATE_EVENT', accountId, {
-        calendar_id: calendarId,
-        summary: event.title,
-        description: event.description,
-        location: event.location,
-        start_datetime: toNaiveUtc(event.start),
-        event_duration_hour: hours,
-        event_duration_minutes: durationMinutes,
-        timezone: 'UTC',
-        ...(event.private && { visibility: 'private' }),
-      }),
-    )
-    const id = payload.id
-    if (id === undefined || id === null || id === '') throw new Error('GOOGLECALENDAR_CREATE_EVENT returned no event id')
-    // Fidelity pass over what no Composio Google tool accepts: colorId, and the conference.
-    // Accounts with "automatically add Google Meet" mint a NEW room on every event created on them,
-    // so the copy would advertise a join link to an empty meeting — always send conferenceData:
-    // the source's real Meet when there is one, null to strip whatever the account attached.
-    // ponytail: one extra call per created event; fold into create if a tool ever accepts these.
-    try {
       await proxyRequest(
         accountId,
-        'PATCH',
-        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${String(id)}?conferenceDataVersion=1`,
-        { ...(event.colorId && { colorId: event.colorId }), conferenceData: meetConferenceData(event.conferenceUri) },
-      )
-    } catch (e) {
-      // never fail the sync here — the event exists, and throwing would loop recreates forever
-      console.error('event fidelity patch failed:', e instanceof Error ? e.message : e)
-    }
+        'POST',
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?conferenceDataVersion=1`,
+        {
+          summary: event.title,
+          description: event.description,
+          location: event.location,
+          start: toGoogleTime(event.start, event.allDay),
+          end: toGoogleTime(event.end, event.allDay),
+          reminders: { useDefault: false, overrides: [] },
+          ...(event.private && { visibility: 'private' }),
+          ...(event.colorId && { colorId: event.colorId }),
+          conferenceData: meetConferenceData(event.conferenceUri),
+        },
+      ),
+    )
+    const id = payload.id
+    if (id === undefined || id === null || id === '') throw new Error('google events.insert returned no event id')
     return String(id)
   },
 

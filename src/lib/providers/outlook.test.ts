@@ -98,66 +98,61 @@ describe('outlookProvider.listChanges', () => {
 })
 
 describe('outlookProvider writes', () => {
-  it('creates events with naive UTC datetimes on the default calendar', async () => {
-    executeTool.mockResolvedValueOnce({ response_data: { id: 'new1' } })
+  const url = 'https://graph.microsoft.com/v1.0/me/events'
+
+  it('creates timed events through Graph with UTC instants, busy, and no reminder', async () => {
+    proxyRequest.mockResolvedValueOnce({ id: 'new1' })
     const id = await outlookProvider.createEvent('acc1', 'cal1', {
       title: 'Busy', description: 'x', start: '2026-07-08T10:00:00+03:00', end: '2026-07-08T11:00:00+03:00', allDay: false,
     })
     expect(id).toBe('new1')
-    expect(executeTool).toHaveBeenCalledWith('OUTLOOK_OUTLOOK_CALENDAR_CREATE_EVENT', 'acc1', {
+    expect(executeTool).not.toHaveBeenCalled()
+    expect(proxyRequest).toHaveBeenCalledWith('acc1', 'POST', url, {
       subject: 'Busy',
-      body: 'x',
+      body: { contentType: 'text', content: 'x' },
       location: undefined,
-      start_datetime: '2026-07-08T07:00:00',
-      end_datetime: '2026-07-08T08:00:00',
-      time_zone: 'UTC',
-      show_as: 'busy',
+      start: { dateTime: '2026-07-08T07:00:00', timeZone: 'UTC' },
+      end: { dateTime: '2026-07-08T08:00:00', timeZone: 'UTC' },
+      isAllDay: false,
+      showAs: 'busy',
+      isReminderOn: false,
     })
   })
 
-  it('creates all-day events as an untruncated multi-day timed span', async () => {
-    executeTool.mockResolvedValueOnce({ id: 'new2' })
-    await outlookProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-07-09', end: '2026-07-12', allDay: true })
-    expect(executeTool).toHaveBeenCalledWith('OUTLOOK_OUTLOOK_CALENDAR_CREATE_EVENT', 'acc1', {
+  it('creates all-day copies as real all-day events spanning the full date range', async () => {
+    proxyRequest.mockResolvedValueOnce({ id: 'new2' })
+    await outlookProvider.createEvent('acc1', 'cal1', { title: 'Busy', location: 'Home', start: '2026-07-09', end: '2026-07-12', allDay: true })
+    expect(proxyRequest).toHaveBeenCalledWith('acc1', 'POST', url, {
       subject: 'Busy',
-      body: '',
-      location: undefined,
-      start_datetime: '2026-07-09T00:00:00',
-      end_datetime: '2026-07-12T00:00:00',
-      time_zone: 'UTC',
-      show_as: 'busy',
+      body: { contentType: 'text', content: '' },
+      location: { displayName: 'Home' },
+      start: { dateTime: '2026-07-09T00:00:00', timeZone: 'UTC' },
+      end: { dateTime: '2026-07-12T00:00:00', timeZone: 'UTC' },
+      isAllDay: true,
+      showAs: 'busy',
+      isReminderOn: false,
     })
   })
 
   it('throws when the create response has no id', async () => {
-    executeTool.mockResolvedValueOnce({ response_data: {} })
+    proxyRequest.mockResolvedValueOnce({})
     await expect(
       outlookProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false }),
     ).rejects.toThrow('no event id')
   })
 
-  it('patches sensitivity through the proxy for private writes', async () => {
-    executeTool.mockResolvedValueOnce({ id: 'new-p' })
-    proxyRequest.mockResolvedValueOnce({})
+  it('sends sensitivity private in the create body for private writes, omits it otherwise', async () => {
+    proxyRequest.mockResolvedValueOnce({ id: 'new-p' })
     const id = await outlookProvider.createEvent('acc1', 'cal1', {
       title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false, private: true,
     })
     expect(id).toBe('new-p')
-    expect(proxyRequest).toHaveBeenCalledWith('acc1', 'PATCH', 'https://graph.microsoft.com/v1.0/me/events/new-p', { sensitivity: 'private' })
-  })
+    expect(proxyRequest).toHaveBeenCalledTimes(1)
+    expect(proxyRequest.mock.calls[0][3]).toMatchObject({ sensitivity: 'private' })
 
-  it('skips the proxy entirely for non-private writes', async () => {
-    executeTool.mockResolvedValueOnce({ id: 'new-np' })
+    proxyRequest.mockResolvedValueOnce({ id: 'new-np' })
     await outlookProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false })
-    expect(proxyRequest).not.toHaveBeenCalled()
-  })
-
-  it('still returns the event id when the sensitivity patch fails', async () => {
-    executeTool.mockResolvedValueOnce({ id: 'new-f' })
-    proxyRequest.mockRejectedValueOnce(new Error('proxy down'))
-    await expect(
-      outlookProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false, private: true }),
-    ).resolves.toBe('new-f')
+    expect(proxyRequest.mock.calls[1][3]).not.toHaveProperty('sensitivity')
   })
 
   it('deletes events without sending cancellation notifications', async () => {

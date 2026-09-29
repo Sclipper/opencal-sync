@@ -32,13 +32,18 @@ export function buildWriteEvent(src: NormalizedEvent, link: SyncLinkConfig): Wri
   }
 }
 
+// Bump when the WRITTEN form of every copy changes (not just new optional fields): every mapping's
+// hash then misses and the engine recreates each copy once with the new shape.
+//   v2: real all-day events + reminders off (previously 00:00Z+24h timed spans with default reminders)
+const HASH_VERSION = 'v2'
+
 export function contentHash(w: WriteEvent): string {
   // Optional fields are appended only when set, so mappings written before each field existed keep
   // their hashes (no mass recreate on upgrade). Guests and the original link ride in description.
   return createHash('sha256')
     .update(
       JSON.stringify([
-        w.title, w.description ?? '', w.location ?? '', w.start, w.end, w.allDay,
+        HASH_VERSION, w.title, w.description ?? '', w.location ?? '', w.start, w.end, w.allDay,
         ...(w.colorId ? [w.colorId] : []),
         ...(w.conferenceUri ? [w.conferenceUri] : []),
         ...(w.private ? ['private'] : []),
@@ -96,19 +101,15 @@ export function planActions(opts: {
 // asks: "which active target events are NOT mapped by any link into this calendar, yet look
 // exactly like something we would have written?" — those are orphans and get deleted.
 //
-// Shape matching mirrors what googleProvider.createEvent actually produces (all-day events are
-// written as timed 24h blocks, durations are clamped to 24h) so orphans of those events still
-// match. ponytail: google-target semantics only — the engine gates the janitor accordingly.
+// Shape matching: providers now write the exact instants they are given (all-day as real all-day
+// events), so a write and its copy share title + start + end. All-day dates and timed instants both
+// reduce to epochs (date = UTC midnight), which also keeps copies written before all-day support
+// (00:00Z + 24h timed) collectable. ponytail: google-target semantics only — the engine gates the janitor.
 
 const toEpoch = (v: string) => Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T00:00:00Z` : v)
 
 function writeShapeKey(w: WriteEvent): string {
-  const start = toEpoch(w.start)
-  // mirror google.createEvent: minutes rounded, floor hours, clamp at 24h (clamped events lose their minutes)
-  const minutes = Math.max(1, Math.round((toEpoch(w.end) - start) / 60_000))
-  const rawHours = Math.floor(minutes / 60)
-  const durationMin = Math.min(24, rawHours) * 60 + (rawHours > 24 ? 0 : minutes % 60)
-  return `${w.title}|${start}|${start + durationMin * 60_000}`
+  return `${w.title}|${toEpoch(w.start)}|${toEpoch(w.end)}`
 }
 
 function eventShapeKey(e: NormalizedEvent): string {

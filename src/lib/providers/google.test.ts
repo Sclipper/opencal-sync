@@ -90,102 +90,79 @@ describe('googleProvider.listChanges', () => {
 })
 
 describe('googleProvider.createEvent', () => {
-  it('creates a timed event with computed duration and returns its id', async () => {
-    executeTool.mockResolvedValueOnce({ response_data: { id: 'new-ev' } })
+  const url = 'https://www.googleapis.com/calendar/v3/calendars/cal1/events?conferenceDataVersion=1'
+
+  it('creates a timed event through the raw API with reminders switched off', async () => {
+    proxyRequest.mockResolvedValueOnce({ id: 'new-ev' })
     const id = await googleProvider.createEvent('acc1', 'cal1', {
       title: 'Busy', start: '2026-07-08T10:00:00+03:00', end: '2026-07-08T11:30:00+03:00', allDay: false,
     })
     expect(id).toBe('new-ev')
-    expect(executeTool).toHaveBeenCalledWith('GOOGLECALENDAR_CREATE_EVENT', 'acc1', {
-      calendar_id: 'cal1',
+    expect(executeTool).not.toHaveBeenCalled()
+    expect(proxyRequest).toHaveBeenCalledTimes(1)
+    expect(proxyRequest).toHaveBeenCalledWith('acc1', 'POST', url, {
       summary: 'Busy',
       description: undefined,
       location: undefined,
-      start_datetime: '2026-07-08T07:00:00',
-      event_duration_hour: 1,
-      event_duration_minutes: 30,
-      timezone: 'UTC',
+      start: { dateTime: '2026-07-08T07:00:00.000Z' },
+      end: { dateTime: '2026-07-08T08:30:00.000Z' },
+      reminders: { useDefault: false, overrides: [] },
+      conferenceData: null,
     })
   })
 
-  it('creates all-day blockers as 24h timed events', async () => {
-    // ponytail: Composio create tool has no confirmed all-day support; 24h timed blocker is equivalent for busy purposes
-    executeTool.mockResolvedValueOnce({ id: 'new-ev2' })
-    await googleProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-07-09', end: '2026-07-10', allDay: true })
-    expect(executeTool).toHaveBeenCalledWith('GOOGLECALENDAR_CREATE_EVENT', 'acc1', {
-      calendar_id: 'cal1',
-      summary: 'Busy',
-      description: undefined,
-      location: undefined,
-      start_datetime: '2026-07-09T00:00:00',
-      event_duration_hour: 24,
-      event_duration_minutes: 0,
-      timezone: 'UTC',
+  it('creates all-day copies as real all-day events (dates, not UTC-midnight timed spans)', async () => {
+    proxyRequest.mockResolvedValueOnce({ id: 'new-ev2' })
+    await googleProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-09-17', end: '2026-09-18', allDay: true })
+    expect(proxyRequest.mock.calls[0][3]).toMatchObject({
+      start: { date: '2026-09-17' },
+      end: { date: '2026-09-18' },
+      reminders: { useDefault: false, overrides: [] },
     })
   })
 
-  it('clamps multi-day (>24h) events to a 24h blocker with a naive start', async () => {
-    executeTool.mockResolvedValueOnce({ id: 'new-ev3' })
+  it('keeps multi-day all-day events multi-day', async () => {
+    proxyRequest.mockResolvedValueOnce({ id: 'new-ev3' })
     await googleProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-07-09', end: '2026-07-12', allDay: true })
-    expect(executeTool).toHaveBeenCalledWith('GOOGLECALENDAR_CREATE_EVENT', 'acc1', {
-      calendar_id: 'cal1',
-      summary: 'Busy',
-      description: undefined,
-      location: undefined,
-      start_datetime: '2026-07-09T00:00:00',
-      event_duration_hour: 24,
-      event_duration_minutes: 0,
-      timezone: 'UTC',
-    })
+    expect(proxyRequest.mock.calls[0][3]).toMatchObject({ start: { date: '2026-07-09' }, end: { date: '2026-07-12' } })
+  })
+
+  it('url-encodes the calendar id', async () => {
+    proxyRequest.mockResolvedValueOnce({ id: 'x' })
+    await googleProvider.createEvent('acc1', 'my cal@x.com', { title: 'Busy', start: '2026-07-09', end: '2026-07-10', allDay: true })
+    expect(proxyRequest.mock.calls[0][2]).toBe(
+      'https://www.googleapis.com/calendar/v3/calendars/my%20cal%40x.com/events?conferenceDataVersion=1',
+    )
   })
 
   it('throws when the create response has no id', async () => {
-    executeTool.mockResolvedValueOnce({ response_data: {} })
+    proxyRequest.mockResolvedValueOnce({})
     await expect(
       googleProvider.createEvent('acc1', 'cal1', { title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false }),
     ).rejects.toThrow('no event id')
   })
 })
 
-describe('googleProvider.createEvent fidelity patch', () => {
+describe('googleProvider.createEvent fidelity', () => {
   const base = { title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false }
 
-  it('patches colorId through the proxy after creating', async () => {
-    executeTool.mockResolvedValueOnce({ id: 'ev1' })
-    proxyRequest.mockResolvedValueOnce({})
-
-    const id = await googleProvider.createEvent('acc1', 'my cal@x.com', { ...base, colorId: '7' })
-
-    expect(id).toBe('ev1')
-    expect(proxyRequest).toHaveBeenCalledWith(
-      'acc1',
-      'PATCH',
-      'https://www.googleapis.com/calendar/v3/calendars/my%20cal%40x.com/events/ev1?conferenceDataVersion=1',
-      { colorId: '7', conferenceData: null },
-    )
+  it('sends colorId in the create body', async () => {
+    proxyRequest.mockResolvedValueOnce({ id: 'ev1' })
+    await googleProvider.createEvent('acc1', 'cal1', { ...base, colorId: '7' })
+    expect(proxyRequest.mock.calls[0][3]).toMatchObject({ colorId: '7', conferenceData: null })
   })
 
-  it('strips a conference the target account auto-attached when the source had none', async () => {
-    executeTool.mockResolvedValueOnce({ id: 'ev1' })
-    proxyRequest.mockResolvedValueOnce({})
-
+  it('strips a conference the target account would auto-attach when the source had none', async () => {
+    proxyRequest.mockResolvedValueOnce({ id: 'ev1' })
     await googleProvider.createEvent('acc1', 'cal1', base)
-
-    expect(proxyRequest).toHaveBeenCalledWith(
-      'acc1',
-      'PATCH',
-      'https://www.googleapis.com/calendar/v3/calendars/cal1/events/ev1?conferenceDataVersion=1',
-      { conferenceData: null },
-    )
+    expect(proxyRequest.mock.calls[0][3]).toMatchObject({ conferenceData: null })
+    expect(proxyRequest.mock.calls[0][3]).not.toHaveProperty('colorId')
   })
 
   it("attaches the source's own Meet room so the copy joins the real meeting", async () => {
-    executeTool.mockResolvedValueOnce({ id: 'ev1' })
-    proxyRequest.mockResolvedValueOnce({})
-
+    proxyRequest.mockResolvedValueOnce({ id: 'ev1' })
     await googleProvider.createEvent('acc1', 'cal1', { ...base, conferenceUri: 'https://meet.google.com/bic-rpmi-hei' })
-
-    expect(proxyRequest.mock.calls[0][3]).toEqual({
+    expect(proxyRequest.mock.calls[0][3]).toMatchObject({
       conferenceData: {
         conferenceId: 'bic-rpmi-hei',
         conferenceSolution: { key: { type: 'hangoutsMeet' }, name: 'Google Meet' },
@@ -198,28 +175,20 @@ describe('googleProvider.createEvent fidelity patch', () => {
     })
   })
 
+  it('sends visibility private when the write is private, omits it otherwise', async () => {
+    proxyRequest.mockResolvedValueOnce({ id: 'ev-p' })
+    await googleProvider.createEvent('acc1', 'cal1', { ...base, private: true })
+    expect(proxyRequest.mock.calls[0][3]).toMatchObject({ visibility: 'private' })
+
+    proxyRequest.mockResolvedValueOnce({ id: 'ev-q' })
+    await googleProvider.createEvent('acc1', 'cal1', base)
+    expect(proxyRequest.mock.calls[1][3]).not.toHaveProperty('visibility')
+  })
+
   it('cannot attach a non-Meet conference, so it strips instead of faking one', async () => {
-    executeTool.mockResolvedValueOnce({ id: 'ev1' })
-    proxyRequest.mockResolvedValueOnce({})
-
+    proxyRequest.mockResolvedValueOnce({ id: 'ev1' })
     await googleProvider.createEvent('acc1', 'cal1', { ...base, conferenceUri: 'https://zoom.us/j/123456' })
-
-    expect(proxyRequest.mock.calls[0][3]).toEqual({ conferenceData: null })
-  })
-
-  it('passes visibility private when the write is private, omits it otherwise', async () => {
-    executeTool.mockResolvedValueOnce({ id: 'ev-p' })
-    await googleProvider.createEvent('acc1', 'cal1', {
-      title: 'Busy', start: '2026-07-08T10:00:00Z', end: '2026-07-08T11:00:00Z', allDay: false, private: true,
-    })
-    expect(executeTool).toHaveBeenCalledWith('GOOGLECALENDAR_CREATE_EVENT', 'acc1', expect.objectContaining({ visibility: 'private' }))
-  })
-
-  it('still returns the event id when the fidelity patch fails', async () => {
-    executeTool.mockResolvedValueOnce({ id: 'ev1' })
-    proxyRequest.mockRejectedValueOnce(new Error('proxy down'))
-
-    await expect(googleProvider.createEvent('acc1', 'cal1', { ...base, colorId: '5' })).resolves.toBe('ev1')
+    expect(proxyRequest.mock.calls[0][3]).toMatchObject({ conferenceData: null })
   })
 })
 
