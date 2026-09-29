@@ -27,6 +27,7 @@ export type WriteEvent = {
   // The source's real conference. Providers must attach this one rather than let the target
   // account mint a new room, or the copy advertises a join link to an empty meeting.
   conferenceUri?: string
+  private?: boolean // mark the copy private at the provider; shared-calendar viewers see no details
 }
 
 export type CalendarInfo = { id: string; name: string; primary?: boolean; accessRole?: string }

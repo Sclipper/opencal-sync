@@ -118,6 +118,7 @@ export const googleProvider: CalendarProvider = {
         event_duration_hour: hours,
         event_duration_minutes: durationMinutes,
         timezone: 'UTC',
+        ...(event.private && { visibility: 'private' }),
       }),
     )
     const id = payload.id

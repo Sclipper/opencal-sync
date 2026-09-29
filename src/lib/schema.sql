@@ -25,8 +25,10 @@ CREATE TABLE IF NOT EXISTS sync_links (
   target_calendar_id INTEGER NOT NULL REFERENCES calendars(id) ON DELETE CASCADE,
   mode TEXT NOT NULL DEFAULT 'busy' CHECK (mode IN ('busy', 'clone')),
   busy_title TEXT NOT NULL DEFAULT 'Busy',
+  title_prefix TEXT NOT NULL DEFAULT '',
   title_suffix TEXT NOT NULL DEFAULT '',
   event_color TEXT NOT NULL DEFAULT '', -- google colorId 1-11; '' = calendar default; ignored by outlook targets
+  private_copy INTEGER NOT NULL DEFAULT 0, -- mark created copies private at the provider
 
   pair_id TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,

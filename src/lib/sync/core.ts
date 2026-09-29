@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto'
 import type { NormalizedEvent, WriteEvent } from '../providers/types'
 
-export type SyncLinkConfig = { mode: 'busy' | 'clone'; busyTitle: string; titleSuffix?: string; eventColor?: string }
+export type SyncLinkConfig = { mode: 'busy' | 'clone'; busyTitle: string; titlePrefix?: string; titleSuffix?: string; eventColor?: string; privateCopy?: boolean }
 
 export function buildWriteEvent(src: NormalizedEvent, link: SyncLinkConfig): WriteEvent {
   const colorId = link.eventColor || undefined
+  const flags = { ...(colorId && { colorId }), ...(link.privateCopy && { private: true }) }
   if (link.mode === 'busy') {
-    return { title: link.busyTitle, start: src.start, end: src.end, allDay: src.allDay, ...(colorId && { colorId }) }
+    return { title: link.busyTitle, start: src.start, end: src.end, allDay: src.allDay, ...flags }
   }
   const base = src.title || '(No title)'
   const guests = (src.attendees ?? []).filter((a) => a.email)
@@ -20,13 +21,13 @@ export function buildWriteEvent(src: NormalizedEvent, link: SyncLinkConfig): Wri
     src.sourceLink && `Original: ${src.sourceLink}`,
   ].filter(Boolean).join('\n')
   return {
-    title: link.titleSuffix ? `${base} ${link.titleSuffix}` : base,
+    title: [link.titlePrefix, base, link.titleSuffix].filter(Boolean).join(' '),
     description: [src.description, footer].filter(Boolean).join('\n\n') || undefined,
     location: src.location || undefined,
     start: src.start,
     end: src.end,
     allDay: src.allDay,
-    ...(colorId && { colorId }),
+    ...flags,
     ...(src.conferenceUri && { conferenceUri: src.conferenceUri }),
   }
 }
@@ -40,6 +41,7 @@ export function contentHash(w: WriteEvent): string {
         w.title, w.description ?? '', w.location ?? '', w.start, w.end, w.allDay,
         ...(w.colorId ? [w.colorId] : []),
         ...(w.conferenceUri ? [w.conferenceUri] : []),
+        ...(w.private ? ['private'] : []),
       ]),
     )
     .digest('hex')

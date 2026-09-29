@@ -83,6 +83,24 @@ describe('buildWriteEvent', () => {
     expect(buildWriteEvent(event(), { ...busyLink, titleSuffix: '(Hyperion)' }).title).toBe('Busy')
   })
 
+  it('clone mode prepends the title prefix with a space', () => {
+    const link = { ...cloneLink, titlePrefix: '[Work]' }
+    expect(buildWriteEvent(event(), link).title).toBe('[Work] Meeting')
+    expect(buildWriteEvent(event(), { ...link, titleSuffix: '(copy)' }).title).toBe('[Work] Meeting (copy)')
+    expect(buildWriteEvent(event({ title: '' }), link).title).toBe('[Work] (No title)')
+  })
+
+  it('busy mode ignores the title prefix', () => {
+    expect(buildWriteEvent(event(), { ...busyLink, titlePrefix: '[Work]' }).title).toBe('Busy')
+  })
+
+  it('sets private in both modes when the link opts in, omits it otherwise', () => {
+    expect(buildWriteEvent(event(), { ...busyLink, privateCopy: true }).private).toBe(true)
+    expect(buildWriteEvent(event(), { ...cloneLink, privateCopy: true }).private).toBe(true)
+    expect('private' in buildWriteEvent(event(), busyLink)).toBe(false)
+    expect('private' in buildWriteEvent(event(), { ...cloneLink, privateCopy: false })).toBe(false)
+  })
+
   it('sets colorId in both modes when the link has an event color', () => {
     expect(buildWriteEvent(event(), { ...busyLink, eventColor: '7' }).colorId).toBe('7')
     expect(buildWriteEvent(event(), { ...cloneLink, eventColor: '7' }).colorId).toBe('7')
@@ -130,6 +148,12 @@ describe('contentHash', () => {
     const plain = buildWriteEvent(event(), cloneLink)
     expect(contentHash({ ...plain, conferenceUri: 'https://meet.google.com/aaa-bbbb-ccc' })).not.toBe(contentHash(plain))
     expect(contentHash({ ...plain, conferenceUri: undefined })).toBe(contentHash(plain))
+  })
+
+  it('private changes the hash, but non-private events hash as before the feature existed', () => {
+    const plain = buildWriteEvent(event(), busyLink)
+    expect(contentHash({ ...plain, private: true })).not.toBe(contentHash(plain))
+    expect(contentHash({ ...plain, private: undefined })).toBe(contentHash(plain))
   })
 })
 
