@@ -297,6 +297,41 @@ describe('runSyncCycle', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_state WHERE calendar_id = 1').get()).toEqual({ n: 0 })
   })
 
+  describe('stale series-master cleanup (full-refetch cycles)', () => {
+    // Mapping 'abc' is a series master the old incremental code (no singleEvents) wrote: a copy of
+    // the first occurrence that the instance copies now duplicate.
+    const seedMaster = () => {
+      db.prepare("INSERT INTO event_mappings (sync_link_id, source_event_id, target_event_id, content_hash, updated_at) VALUES (1, 'abc', 'tgt-master', 'h', datetime('now'))").run()
+    }
+    const instances = [ev('abc_20260708T100000Z'), ev('abc_20260715T100000Z', { start: '2026-07-15T10:00:00Z', end: '2026-07-15T11:00:00Z' })]
+
+    it('deletes the master copy and its mapping when the full fetch returns its instances', async () => {
+      seedMaster()
+      db.prepare("INSERT INTO event_mappings (sync_link_id, source_event_id, target_event_id, content_hash, updated_at) VALUES (1, 'elsewhere', 'tgt-elsewhere', 'h', datetime('now'))").run()
+      const g = makeFakeProvider({ changes: () => ({ events: instances, nextCursor: 'c1' }) })
+      const o = makeFakeProvider({})
+
+      const res = await runSyncCycle(deps(g.provider, o.provider))
+
+      expect(o.calls.filter((c) => c.method === 'deleteEvent')).toEqual([{ method: 'deleteEvent', args: ['tgt-master'] }])
+      const ids = db.prepare('SELECT source_event_id FROM event_mappings ORDER BY source_event_id').all()
+      expect(ids).toEqual([{ source_event_id: 'abc_20260708T100000Z' }, { source_event_id: 'abc_20260715T100000Z' }, { source_event_id: 'elsewhere' }])
+      expect(res).toEqual({ processed: 3, errors: [] }) // 2 creates + 1 master delete
+    })
+
+    it('does not run on incremental cycles', async () => {
+      seedMaster()
+      db.prepare("INSERT INTO sync_state (calendar_id, sync_cursor, anchored_at) VALUES (1, 'cur', datetime('now'))").run()
+      const g = makeFakeProvider({ changes: () => ({ events: instances, nextCursor: 'c2' }) })
+      const o = makeFakeProvider({})
+
+      await runSyncCycle(deps(g.provider, o.provider))
+
+      expect(o.calls.filter((c) => c.method === 'deleteEvent')).toEqual([])
+      expect(db.prepare("SELECT COUNT(*) AS n FROM event_mappings WHERE source_event_id = 'abc'").get()).toEqual({ n: 1 })
+    })
+  })
+
   describe('janitor (google targets, full-refetch cycles)', () => {
     function seedGoogleToGoogle(db: DB) {
       db.prepare("INSERT INTO connections (provider, composio_connected_account_id, status) VALUES ('google', 'acc-g2', 'active')").run()

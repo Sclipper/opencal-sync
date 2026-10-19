@@ -65,8 +65,13 @@ async function listRange(
   let pageToken: string | undefined
   let nextCursor: string | null = cursor
   do {
+    // singleEvents must ride on the incremental call too: Google defaults it to false, and a
+    // syncToken request without it returns a recurring series as ONE master item (id without the
+    // _YYYYMMDDTHHMMSSZ suffix, times of the first occurrence) instead of its instances — so a
+    // series created or edited after the first full sync only ever got its first occurrence copied.
+    // syncToken forbids timeMin/timeMax/orderBy/q, but singleEvents and showDeleted are allowed.
     const args: Record<string, unknown> = cursor
-      ? { calendarId, syncToken: cursor, pageToken }
+      ? { calendarId, syncToken: cursor, singleEvents: true, showDeleted, pageToken }
       : { calendarId, timeMin, timeMax, singleEvents: true, showDeleted, maxResults: 250, pageToken }
     const payload = unwrap(await executeTool('GOOGLECALENDAR_EVENTS_LIST', accountId, args))
     for (const item of payload.items ?? []) events.push(mapEvent(item))

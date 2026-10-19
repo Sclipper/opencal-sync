@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '../providers/types'
-import { buildWriteEvent, contentHash, findOrphanTargets, planActions } from './core'
+import { buildWriteEvent, contentHash, findOrphanTargets, findStaleSeriesMasters, planActions } from './core'
 
 function event(over: Partial<NormalizedEvent> = {}): NormalizedEvent {
   return {
@@ -274,5 +274,48 @@ describe('findOrphanTargets', () => {
   it('ignores cancelled events', () => {
     const events = [tgt('orphan-1', { status: 'cancelled' as const })]
     expect(findOrphanTargets(events, [write()], new Set())).toEqual([])
+  })
+})
+
+describe('findStaleSeriesMasters', () => {
+  // Before singleEvents rode on syncToken requests, a recurring series created after the first full
+  // sync arrived as ONE master item (id without the instance suffix) and got a single copy. The next
+  // full refetch then expanded it into instances — but the master mapping stayed behind, a permanent
+  // duplicate of the first occurrence. On full refetches, a mapping whose id is the prefix of
+  // instance ids in the same fetch is such a master: delete its copy and its mapping.
+  const m = (targetEventId: string) => ({ targetEventId, contentHash: 'h' })
+
+  it('deletes a suffix-less mapping whose id prefixes instance ids in the fetch', () => {
+    const mappings = new Map([['abc', m('tgt-master')], ['abc_20260708T100000Z', m('tgt-1')]])
+    const events = [event({ id: 'abc_20260708T100000Z' }), event({ id: 'abc_20260715T100000Z' })]
+    expect(findStaleSeriesMasters(events, mappings)).toEqual([{ type: 'delete', sourceEventId: 'abc', targetEventId: 'tgt-master' }])
+  })
+
+  it('recognises all-day instance ids (date-only suffix)', () => {
+    const mappings = new Map([['abc', m('tgt-master')]])
+    expect(findStaleSeriesMasters([event({ id: 'abc_20260708' })], mappings)).toEqual([
+      { type: 'delete', sourceEventId: 'abc', targetEventId: 'tgt-master' },
+    ])
+  })
+
+  it('leaves mappings alone that are merely absent from the window', () => {
+    const mappings = new Map([['gone', m('tgt-gone')], ['abc', m('tgt-master')]])
+    expect(findStaleSeriesMasters([event({ id: 'unrelated' })], mappings)).toEqual([])
+  })
+
+  it('does not treat an instance mapping as a master of another instance', () => {
+    const mappings = new Map([['abc_20260708T100000Z', m('tgt-1')]])
+    const events = [event({ id: 'abc_20260708T100000Z' }), event({ id: 'abc_20260715T100000Z' })]
+    expect(findStaleSeriesMasters(events, mappings)).toEqual([])
+  })
+
+  it('requires the instance suffix shape, not just a shared prefix', () => {
+    const mappings = new Map([['abc', m('tgt-abc')]])
+    expect(findStaleSeriesMasters([event({ id: 'abc_def' }), event({ id: 'abcd_20260708T100000Z' })], mappings)).toEqual([])
+  })
+
+  it('keeps a mapping whose id is itself returned in the fetch (planActions owns it)', () => {
+    const mappings = new Map([['abc', m('tgt-abc')]])
+    expect(findStaleSeriesMasters([event({ id: 'abc' }), event({ id: 'abc_20260708T100000Z' })], mappings)).toEqual([])
   })
 })

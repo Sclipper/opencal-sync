@@ -95,6 +95,34 @@ export function planActions(opts: {
   return actions
 }
 
+// —— stale series-master cleanup ———————————————————————————————————————
+// Until singleEvents rode on syncToken requests, a recurring series created or edited after a
+// calendar's first full sync came back from the incremental call as ONE master item: the series id
+// without the instance suffix, with the first occurrence's times. That got a single copy. The next
+// 24h re-anchor expanded the series into instances (id + '_' + YYYYMMDDTHHMMSSZ, or '_' + YYYYMMDD
+// for all-day series) and copied each — but the master mapping was never removed, so the first
+// occurrence stayed permanently duplicated. On full-refetch cycles, a suffix-less mapping whose id
+// is the prefix of instance ids in the same fetch is such a master: delete its copy and mapping.
+// Deliberately narrow — a mapping merely absent from the window is left alone.
+
+const INSTANCE_SUFFIX = /_\d{8}(T\d{6}Z)?$/
+
+export function findStaleSeriesMasters(events: NormalizedEvent[], mappings: Map<string, Mapping>): Action[] {
+  const fetchedIds = new Set(events.map((e) => e.id))
+  const seriesWithInstances = new Set<string>()
+  for (const id of fetchedIds) {
+    const match = id.match(INSTANCE_SUFFIX)
+    if (match) seriesWithInstances.add(id.slice(0, -match[0].length))
+  }
+  const actions: Action[] = []
+  for (const [sourceEventId, mapping] of mappings) {
+    if (INSTANCE_SUFFIX.test(sourceEventId) || fetchedIds.has(sourceEventId)) continue
+    if (!seriesWithInstances.has(sourceEventId)) continue
+    actions.push({ type: 'delete', sourceEventId, targetEventId: mapping.targetEventId })
+  }
+  return actions
+}
+
 // —— orphan janitor ————————————————————————————————————————————————
 // A concurrent cycle or a crash between createEvent and the mapping upsert leaves an untracked
 // copy in the target calendar that nothing will ever delete. On full-refetch cycles the engine
