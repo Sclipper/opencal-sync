@@ -73,13 +73,29 @@ describe('googleProvider.listChanges', () => {
     const res = await googleProvider.listChanges('acc1', 'cal1', 'tok-1', 'ws', 'we')
 
     expect(executeTool).toHaveBeenNthCalledWith(1, 'GOOGLECALENDAR_EVENTS_LIST', 'acc1', {
-      calendarId: 'cal1', syncToken: 'tok-1', pageToken: undefined,
+      calendarId: 'cal1', syncToken: 'tok-1', singleEvents: true, showDeleted: true, pageToken: undefined,
     })
     expect(executeTool).toHaveBeenNthCalledWith(2, 'GOOGLECALENDAR_EVENTS_LIST', 'acc1', {
-      calendarId: 'cal1', syncToken: 'tok-1', pageToken: 'p2',
+      calendarId: 'cal1', syncToken: 'tok-1', singleEvents: true, showDeleted: true, pageToken: 'p2',
     })
     expect(res.events).toHaveLength(1)
     expect(res.nextCursor).toBe('tok-2')
+  })
+
+  it('expands recurring series into instances on incremental fetches too', async () => {
+    // Google defaults singleEvents to false; without it an incremental call returns one series-master
+    // item per recurring event (id without the _YYYYMMDDTHHMMSSZ suffix), so only the first
+    // occurrence ever got a copy until the next 24h re-anchor.
+    executeTool.mockResolvedValueOnce({ items: [], nextSyncToken: 'tok-2' })
+
+    await googleProvider.listChanges('acc1', 'cal1', 'tok-1', 'ws', 'we')
+
+    const args = executeTool.mock.calls[0][2] as Record<string, unknown>
+    expect(args.syncToken).toBe('tok-1')
+    expect(args.singleEvents).toBe(true)
+    // syncToken forbids window/ordering params; they must stay off the incremental call
+    expect(args).not.toHaveProperty('timeMin')
+    expect(args).not.toHaveProperty('timeMax')
   })
 
   it('unwraps response_data envelopes', async () => {

@@ -2,7 +2,7 @@ import { CursorExpiredError, NotFoundError, RateLimitError } from '../composio'
 import type { DB } from '../db'
 import type { CalendarProvider, Changes } from '../providers/types'
 import { getSetting } from '../settings'
-import { buildWriteEvent, findOrphanTargets, planActions, type Mapping } from './core'
+import { buildWriteEvent, findOrphanTargets, findStaleSeriesMasters, planActions, type Mapping } from './core'
 
 export type EngineDeps = {
   db: DB
@@ -151,6 +151,10 @@ async function runSyncCycleLocked(deps: EngineDeps, now: Date): Promise<{ proces
           isOwnEvent: isOwn,
           snapshot: changes.snapshot,
         })
+        // One-time cleanup of series-master copies the pre-singleEvents incremental fetch wrote
+        // (see findStaleSeriesMasters). Only a full fetch of a cursor-based source can tell a master
+        // from a legitimately absent event, so it is gated like the janitor below.
+        if (usedNullCursor && !changes.snapshot) actions.push(...findStaleSeriesMasters(changes.events, mappings))
 
         const target = deps.providerFor(link.tgt_provider)
         try {
