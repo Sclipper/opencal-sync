@@ -1,4 +1,4 @@
-import { NotFoundError } from './composio'
+import { NotFoundError, RateLimitError } from './composio'
 import type { DB } from './db'
 import type { CalendarProvider } from './providers/types'
 
@@ -36,6 +36,7 @@ export async function deleteLinkEvents(
           removeMapping.run(row.id)
           deleted++
         } else {
+          if (e instanceof RateLimitError) throw e // stop hammering; the next pass resumes from the kept mappings
           failed++
           console.error('link cleanup failed:', e instanceof Error ? e.message : e)
         }
@@ -43,4 +44,31 @@ export async function deleteLinkEvents(
     }
   }
   return { deleted, failed }
+}
+
+// Finish every queued removal: connections with status 'removing', then links with enabled = 0.
+// Safe to re-run after a restart, since each mapping is dropped as its event is confirmed gone.
+export async function processRemovals(db: DB, providerFor: ProviderFor): Promise<void> {
+  const connections = db.prepare("SELECT id FROM connections WHERE status = 'removing'").all() as { id: number }[]
+  for (const { id } of connections) {
+    const links = db
+      .prepare(
+        `SELECT DISTINCT l.id FROM sync_links l
+         JOIN calendars sc ON sc.id = l.source_calendar_id
+         JOIN calendars tc ON tc.id = l.target_calendar_id
+         WHERE sc.connection_id = ? OR tc.connection_id = ?`,
+      )
+      .all(id, id) as { id: number }[]
+    // Best effort: if the account's auth is already broken the deletes fail and removal proceeds.
+    await deleteLinkEvents(db, links.map((l) => l.id), providerFor)
+    db.prepare('DELETE FROM connections WHERE id = ?').run(id)
+  }
+
+  const links = db.prepare('SELECT id FROM sync_links WHERE enabled = 0').all() as { id: number }[]
+  for (const { id } of links) {
+    const { failed } = await deleteLinkEvents(db, [id], providerFor)
+    // keep the link (and the surviving mappings) so the next pass retries cleanup
+    if (failed > 0) db.prepare('UPDATE sync_links SET last_error = ? WHERE id = ?').run(`${failed} synced events could not be deleted yet, retrying`, id)
+    else db.prepare('DELETE FROM sync_links WHERE id = ?').run(id)
+  }
 }

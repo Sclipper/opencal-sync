@@ -1,5 +1,6 @@
 import { RateLimitError } from './composio'
 import { getDb } from './db'
+import { processRemovals } from './link-cleanup'
 import { googleProvider } from './providers/google'
 import { outlookProvider } from './providers/outlook'
 import { getSetting } from './settings'
@@ -10,6 +11,8 @@ const providerFor = (p: 'google' | 'outlook') => (p === 'google' ? googleProvide
 declare global {
   // eslint-disable-next-line no-var
   var __opencalTimer: ReturnType<typeof setTimeout> | undefined
+  // global, like the timer: instrumentation and server actions can load separate copies of this module
+  var __opencalRemoving: boolean | undefined
 }
 
 let running = false
@@ -34,10 +37,25 @@ export async function runOnce(): Promise<{ processed: number; errors: string[] }
   }
 }
 
+// Runs outside the sync lock: a large removal takes an hour and must not hold up syncing other links.
+// shortcut: a removal queued during a pass waits for the next tick, fine at the 5–30 min poll interval.
+export async function runRemovals(): Promise<void> {
+  if (globalThis.__opencalRemoving) return
+  globalThis.__opencalRemoving = true
+  try {
+    await processRemovals(getDb(), providerFor)
+  } catch (e) {
+    console.error('[opencal-sync] removal pass failed:', e instanceof Error ? e.message : e)
+  } finally {
+    globalThis.__opencalRemoving = false
+  }
+}
+
 export function startScheduler(): void {
   if (globalThis.__opencalTimer) return
   const tick = async () => {
     let delayMs = 5 * 60_000
+    void runRemovals()
     try {
       const result = await runOnce()
       if (result.errors.length) console.error('[opencal-sync] sync errors:', result.errors)

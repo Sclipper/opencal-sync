@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const executeTool = vi.fn()
 const proxyRequest = vi.fn()
-vi.mock('../composio', () => ({
+vi.mock('../composio', async (importActual) => ({
+  ...(await importActual<typeof import('../composio')>()),
   executeTool: (...args: unknown[]) => executeTool(...args),
   proxyRequest: (...args: unknown[]) => proxyRequest(...args),
 }))
 
 const { googleProvider } = await import('./google')
+const { CursorExpiredError, NotFoundError } = await import('../composio')
 
 beforeEach(() => {
   executeTool.mockReset()
@@ -213,6 +215,11 @@ describe('googleProvider.deleteEvent / listCalendars / listEvents', () => {
     executeTool.mockResolvedValueOnce({})
     await googleProvider.deleteEvent('acc1', 'cal1', 'ev9')
     expect(executeTool).toHaveBeenCalledWith('GOOGLECALENDAR_DELETE_EVENT', 'acc1', { calendar_id: 'cal1', event_id: 'ev9' })
+  })
+
+  it('reports a 410 on delete as already gone, not as an expired cursor', async () => {
+    executeTool.mockRejectedValueOnce(new CursorExpiredError('Google returned 410 Gone'))
+    await expect(googleProvider.deleteEvent('acc1', 'cal1', 'ev9')).rejects.toBeInstanceOf(NotFoundError)
   })
 
   it('lists calendars with primary and access role', async () => {

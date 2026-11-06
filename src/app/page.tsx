@@ -13,7 +13,7 @@ type CalendarRow = {
   connection_id: number; account_label: string; provider: string
 }
 type LinkRow = {
-  id: number; mode: string; pair_id: string | null; event_color: string; title_prefix: string; title_suffix: string; busy_title: string
+  id: number; enabled: number; mode: string; pair_id: string | null; event_color: string; title_prefix: string; title_suffix: string; busy_title: string
   private_copy: number; last_run_at: string | null; last_error: string | null
   src_name: string; src_label: string; tgt_name: string; tgt_label: string
 }
@@ -25,7 +25,6 @@ const ERRORS: Record<string, string> = {
   'readonly-target': 'The target calendar is read-only — pick one you can write to.',
   'connect-failed': 'Connecting the account failed. Check the auth config in Settings.',
   'refresh-failed': 'Re-scanning calendars failed. Try again.',
-  'cleanup-partial': 'Some synced events could not be deleted — the link was kept. Delete it again to retry.',
 }
 
 const isReadOnly = (role: string) => role === 'reader' || role === 'freeBusyReader'
@@ -92,7 +91,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
      ORDER BY con.id, c.is_primary DESC, (c.access_role IN ('reader', 'freeBusyReader')), c.name`,
   ).all() as CalendarRow[]
   const links = db.prepare(
-    `SELECT l.id, l.mode, l.pair_id, l.event_color, l.title_prefix, l.title_suffix, l.busy_title, l.private_copy, l.last_run_at, l.last_error,
+    `SELECT l.id, l.enabled, l.mode, l.pair_id, l.event_color, l.title_prefix, l.title_suffix, l.busy_title, l.private_copy, l.last_run_at, l.last_error,
             sc.name AS src_name, scon.account_label AS src_label, tc.name AS tgt_name, tcon.account_label AS tgt_label
      FROM sync_links l
      JOIN calendars sc ON sc.id = l.source_calendar_id JOIN connections scon ON scon.id = sc.connection_id
@@ -139,7 +138,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                         <div className="overline">{c.provider}</div>
                         <div className="truncate font-bold" title={c.account_label}>{c.account_label || 'pending…'}</div>
                       </div>
-                      <span className={`stamp stamp-tilt ${c.status === 'active' ? 'stamp-go' : c.status === 'pending' ? 'stamp-warn' : 'stamp-err'}`}>
+                      <span className={`stamp stamp-tilt ${c.status === 'active' ? 'stamp-go' : c.status === 'pending' || c.status === 'removing' ? 'stamp-warn' : 'stamp-err'}`}>
                         {c.status}
                       </span>
                     </div>
@@ -166,10 +165,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                           <SubmitButton className="btn-ghost btn-sm" pendingLabel="Scanning…">Re-scan</SubmitButton>
                         </form>
                       ) : <span />}
-                      <form action={deleteConnection}>
-                        <input type="hidden" name="id" value={c.id} />
-                        <SubmitButton className="link-danger" pendingLabel="Removing…">Remove</SubmitButton>
-                      </form>
+                      {c.status !== 'removing' && (
+                        <form action={deleteConnection}>
+                          <input type="hidden" name="id" value={c.id} />
+                          <SubmitButton className="link-danger" pendingLabel="Removing…">Remove</SubmitButton>
+                        </form>
+                      )}
                     </div>
                   </div>
                 )
@@ -220,12 +221,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                     <span className="stamp stamp-dim">{l.mode}</span>
                     {l.private_copy === 1 && <span className="stamp stamp-dim">private</span>}
                     {l.pair_id && <span className="stamp stamp-dim">2-way</span>}
-                    <form action={deleteSyncLink}>
-                      <input type="hidden" name="id" value={l.id} />
-                      {/* ponytail: cleanup deletes one event per API call, serially — a link with
-                          many synced events takes tens of seconds; fan the deletes out if that bites */}
-                      <SubmitButton className="link-danger" pendingLabel="Deleting…">Del</SubmitButton>
-                    </form>
+                    {l.enabled ? (
+                      <form action={deleteSyncLink}>
+                        <input type="hidden" name="id" value={l.id} />
+                        <SubmitButton className="link-danger" pendingLabel="Deleting…">Del</SubmitButton>
+                      </form>
+                    ) : <span className="stamp stamp-warn">removing</span>}
                   </div>
                   <details className="cal-details col-span-full">
                     <summary>
