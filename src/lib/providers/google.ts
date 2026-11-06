@@ -1,4 +1,4 @@
-import { executeTool, proxyRequest } from '../composio'
+import { CursorExpiredError, executeTool, proxyRequest, NotFoundError } from '../composio'
 import type { CalendarProvider, Changes, NormalizedEvent, WriteEvent } from './types'
 
 // Composio wraps some tool outputs in { response_data: ... }; tolerate both.
@@ -135,6 +135,11 @@ export const googleProvider: CalendarProvider = {
   },
 
   async deleteEvent(accountId, calendarId, eventId) {
-    await executeTool('GOOGLECALENDAR_DELETE_EVENT', accountId, { calendar_id: calendarId, event_id: eventId })
+    try {
+      await executeTool('GOOGLECALENDAR_DELETE_EVENT', accountId, { calendar_id: calendarId, event_id: eventId })
+    } catch (e) {
+      // on a delete, 410 means the event is already gone; classifyError reads 410 as an expired sync cursor
+      throw e instanceof CursorExpiredError ? new NotFoundError(e.message) : e
+    }
   },
 }

@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS connections (
   composio_request_id TEXT,
   composio_connected_account_id TEXT,
   account_label TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'pending', -- pending | active | error
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | active | error | removing
   composio_user_id TEXT NOT NULL DEFAULT 'default',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS sync_links (
   private_copy INTEGER NOT NULL DEFAULT 0, -- mark created copies private at the provider
 
   pair_id TEXT,
-  enabled INTEGER NOT NULL DEFAULT 1,
+  enabled INTEGER NOT NULL DEFAULT 1, -- 0 = queued for removal: the next removal pass deletes its events and this row
   last_run_at TEXT,
   last_error TEXT
 );

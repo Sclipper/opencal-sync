@@ -6,13 +6,8 @@ import { redirect } from 'next/navigation'
 import { requireAuth } from '../lib/auth'
 import { refreshCalendars, startConnectionFlow } from '../lib/connections'
 import { getDb } from '../lib/db'
-import { deleteLinkEvents } from '../lib/link-cleanup'
-import { googleProvider } from '../lib/providers/google'
-import { outlookProvider } from '../lib/providers/outlook'
-import { runOnce } from '../lib/scheduler'
+import { runOnce, runRemovals } from '../lib/scheduler'
 import { getSetting } from '../lib/settings'
-
-const providerFor = (p: 'google' | 'outlook') => (p === 'google' ? googleProvider : outlookProvider)
 
 export async function connect(formData: FormData) {
   await requireAuth()
@@ -40,18 +35,13 @@ export async function deleteConnection(formData: FormData) {
   await requireAuth()
   const db = getDb()
   const id = Number(formData.get('id'))
-  // Sweep everything this account's links created (in any calendar) BEFORE the rows cascade away —
-  // best effort: if the account's auth is already broken the deletes fail and removal proceeds.
-  const links = db
-    .prepare(
-      `SELECT DISTINCT l.id FROM sync_links l
-       JOIN calendars sc ON sc.id = l.source_calendar_id
-       JOIN calendars tc ON tc.id = l.target_calendar_id
-       WHERE sc.connection_id = ? OR tc.connection_id = ?`,
-    )
-    .all(id, id) as { id: number }[]
-  await deleteLinkEvents(db, links.map((l) => l.id), providerFor)
-  db.prepare('DELETE FROM connections WHERE id = ?').run(id)
+  // Queue only: the sweep is one API call per event, far longer than a request survives behind the proxy.
+  db.prepare("UPDATE connections SET status = 'removing' WHERE id = ?").run(id)
+  db.prepare(
+    `UPDATE sync_links SET enabled = 0 WHERE source_calendar_id IN (SELECT id FROM calendars WHERE connection_id = ?)
+     OR target_calendar_id IN (SELECT id FROM calendars WHERE connection_id = ?)`,
+  ).run(id, id)
+  void runRemovals()
   revalidatePath('/')
 }
 
@@ -115,16 +105,11 @@ export async function deleteSyncLink(formData: FormData) {
   await requireAuth()
   const db = getDb()
   const id = Number(formData.get('id'))
-  const link = db.prepare('SELECT id, pair_id FROM sync_links WHERE id = ?').get(id) as { id: number; pair_id: string | null } | undefined
+  const link = db.prepare('SELECT pair_id FROM sync_links WHERE id = ?').get(id) as { pair_id: string | null } | undefined
   if (!link) return
-  const ids = link.pair_id
-    ? (db.prepare('SELECT id FROM sync_links WHERE pair_id = ?').all(link.pair_id) as { id: number }[]).map((r) => r.id)
-    : [link.id]
-
-  const { failed } = await deleteLinkEvents(db, ids, providerFor)
-  // keep the link (and the mappings of the events that survived) so deleting again retries cleanup
-  if (failed > 0) redirect('/?error=cleanup-partial')
-  for (const linkId of ids) db.prepare('DELETE FROM sync_links WHERE id = ?').run(linkId)
+  // Queue only, as in deleteConnection.
+  db.prepare('UPDATE sync_links SET enabled = 0 WHERE id = ? OR pair_id = ?').run(id, link.pair_id)
+  void runRemovals()
   revalidatePath('/')
 }
 

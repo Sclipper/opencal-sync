@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createDb, type DB } from './db'
-import { NotFoundError } from './composio'
+import { NotFoundError, RateLimitError } from './composio'
 import type { CalendarProvider } from './providers/types'
-import { deleteLinkEvents } from './link-cleanup'
+import { deleteLinkEvents, processRemovals } from './link-cleanup'
 
 function seed(db: DB) {
   db.prepare("INSERT INTO connections (provider, composio_connected_account_id, status) VALUES ('google', 'acc-g', 'active')").run()
@@ -49,5 +49,58 @@ describe('deleteLinkEvents', () => {
 
     expect(res).toEqual({ deleted: 1, failed: 1 })
     expect(db.prepare('SELECT target_event_id FROM event_mappings').all()).toEqual([{ target_event_id: 't2' }])
+  })
+})
+
+describe('processRemovals', () => {
+  const count = (db: DB, table: string) => (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n
+  const fail = () => provider(async () => { throw new Error('boom') })
+
+  it('leaves links and connections alone unless queued', async () => {
+    const db = createDb()
+    seed(db)
+    const del = vi.fn(async () => {})
+    await processRemovals(db, () => provider(del))
+    expect(del).not.toHaveBeenCalled()
+    expect(count(db, 'sync_links')).toBe(1)
+  })
+
+  it('removes a queued link once its events are gone', async () => {
+    const db = createDb()
+    seed(db)
+    db.prepare('UPDATE sync_links SET enabled = 0').run()
+    await processRemovals(db, () => provider(async () => {}))
+    expect(count(db, 'sync_links')).toBe(0)
+    expect(count(db, 'connections')).toBe(1)
+  })
+
+  it('keeps a queued link and retries while some events cannot be deleted', async () => {
+    const db = createDb()
+    seed(db)
+    db.prepare('UPDATE sync_links SET enabled = 0').run()
+    await processRemovals(db, fail)
+    expect(db.prepare('SELECT last_error FROM sync_links').get()).toEqual({ last_error: '2 synced events could not be deleted yet, retrying' })
+
+    await processRemovals(db, () => provider(async () => {}))
+    expect(count(db, 'sync_links')).toBe(0)
+  })
+
+  it('removes a queued connection even when its deletes fail', async () => {
+    const db = createDb()
+    seed(db)
+    db.prepare("UPDATE connections SET status = 'removing'").run()
+    db.prepare('UPDATE sync_links SET enabled = 0').run()
+    await processRemovals(db, fail)
+    expect(count(db, 'connections')).toBe(0)
+    expect(count(db, 'sync_links')).toBe(0)
+  })
+
+  it('stops on a rate limit and keeps the queued connection for the next pass', async () => {
+    const db = createDb()
+    seed(db)
+    db.prepare("UPDATE connections SET status = 'removing'").run()
+    await expect(processRemovals(db, () => provider(async () => { throw new RateLimitError('429') }))).rejects.toBeInstanceOf(RateLimitError)
+    expect(count(db, 'connections')).toBe(1)
+    expect(count(db, 'event_mappings')).toBe(2)
   })
 })
